@@ -1,0 +1,138 @@
+﻿                                      
+--/************************************************************
+--Procedure	: sp_FormWWA_Select       
+--Database	: PLT_AI*                 
+--Created		: 5-10-2004 - Jonathan Broome
+--Description	: Selects FormWWA records for the
+--			  matching form_id + revision_id.
+--************************************************************/
+--Create Procedure sp_FormWWA_Select (
+--@form_id							int,
+--@revision_id						int,
+--@group_id							int = NULL,
+--@customer_id_from_form				int	= NULL,
+--@customer_id						int	= NULL
+--)
+--as
+
+--select
+--	form_id,
+--	revision_id,
+--	group_id,
+--	customer_id_from_form,
+--	customer_id,
+--	form_version,
+--	app_id,
+--	status,
+--	locked,
+--	signed_pin,
+--	signing_name,
+--	signing_company,
+--	signing_title,
+--	signing_date,
+--	date_created,
+--	date_modified,
+--	created_by,
+--	modified_by,
+--	generator_name,
+--	waste_common_name,
+--	info_basis,
+--	bis_phthalate_flag,
+--	bis_phthalate_actual,
+--	carbazole_flag,
+--	carbazole_actual,
+--	o_cresol_flag,
+--	o_cresol_actual,
+--	p_cresol_flag,
+--	p_cresol_actual,
+--	n_decane_flag,
+--	n_decane_actual,
+--	fluoranthene_flag,
+--	fluoranthene_actual,
+--	n_octadecane_flag,
+--	n_octadecane_actual,
+--	trichlorophenol_246_flag,
+--	trichlorophenol_246_actual,
+--	phosphorus_flag,
+--	phosphorus_actual,
+--	total_chlor_phen_flag,
+--	total_chlor_phen_actual,
+--	total_organic_actual,
+--	pcb_flag,
+--	pcb_actual,
+--	acidity_flag,
+--	acidity_actual,
+--	fog_flag,
+--	fog_actual,
+--	tss_flag,
+--	tss_actual,
+--	bod_flag,
+--	bod_actual,
+--	antimony_flag,
+--	antimony_actual,
+--	arsenic_flag,
+--	arsenic_actual,
+--	cadmium_flag,
+--	cadmium_actual,
+--	chromium_flag,
+--	chromium_actual,
+--	cobalt_flag,
+--	cobalt_actual,
+--	copper_flag,
+--	copper_actual,
+--	cyanide_flag,
+--	cyanide_actual,
+--	iron_flag,
+--	iron_actual,
+--	lead_flag,
+--	lead_actual,
+--	mercury_flag,
+--	mercury_actual,
+--	nickel_flag,
+--	nickel_actual,
+--	silver_flag,
+--	silver_actual,
+--	tin_flag,
+--	tin_actual,
+--	titanium_flag,
+--	titanium_actual,
+--	vanadium_flag,
+--	vanadium_actual,
+--	zinc_flag,
+--	zinc_actual,
+--	method_8240,
+--	method_8270,
+--	method_8080,
+--	method_8150,
+--	used_oil,
+--	oil_mixed,
+--	halogen_gt_1000,
+--	halogen_source,
+--	halogen_source_desc1,
+--	other_desc_1
+--from FormWWA
+--where
+--	(customer_id_from_form = @customer_id_from_form or customer_id = @customer_id)
+--	and
+--	(
+--	(form_id = @form_id and revision_id = @revision_id)
+--	or 
+--	(group_id = @group_id and @group_id is not null)
+--	)
+
+--GO
+--GRANT EXECUTE
+--    ON OBJECT::[dbo].[sp_FormWWA_Select] TO [EQWEB]
+--    AS [dbo];
+--GO
+--GRANT EXECUTE
+--    ON OBJECT::[dbo].[sp_FormWWA_Select] TO [COR_USER]
+--    AS [dbo];
+
+
+
+--GO
+--GRANT EXECUTE
+--    ON OBJECT::[dbo].[sp_FormWWA_Select] TO [EQAI]
+--    AS [dbo];
+

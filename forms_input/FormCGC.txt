@@ -1,0 +1,51 @@
+FormCGC
+Implementing Primary Key & Foreign Key
+
+FormCGC_uid
+
+NEW IDENTITY COLUMN/NEW PRIMARY KEY
+
+
+Replacement of Existing Columns & Data Types
+
+created_by
+CHANGE TO NOT NULL, DATATYPE VARCHAR (60) -> VARCHAR (100)
+
+modified_by
+CHANGE TO NOT NULL, DATATYPE VARCHAR (60) ->VARCHAR(100)
+
+Applying Null/Not Null Constraint
+
+created_by
+CHANGE TO NOT NULL
+
+date_created
+CHANGE TO NOT NULL
+
+modified_by
+CHANGE TO NOT NULL
+
+date_modified
+CHANGE TO NOT NULL
+
+Applying Default Values
+
+created_by
+added DF constraint
+
+date_created
+added DF constraint
+
+modified_by
+added DF constraint
+
+date_modified
+added DF constraint
+
+Justification for audit columns
+
+select count(form_id)
+  from FormCGC
+ where created_by IS NULL
+--200 ROWS
+

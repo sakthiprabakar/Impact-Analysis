@@ -1,0 +1,24 @@
+{
+    "FormAudit": {
+        "primary_key_changes": {
+            "new_primary_key": "FormAudit_uid",
+            "justification": [
+                "Implementing Primary Key & Foreign Key"
+            ]
+        },
+        "column_changes": [
+            {
+                "column": "added_by",
+                "change_type": "datatype_change",
+                "from": "60",
+                "to": "100"
+            },
+            {
+                "column": "rowguid",
+                "change_type": "deletion",
+                "from": "existing_column",
+                "to": "dropped_column"
+            }
+        ]
+    }
+}

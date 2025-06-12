@@ -1,0 +1,8 @@
+boto3 
+pandas 
+xlsxwriter 
+jsonschema 
+python-dotenv
+streamlit
+botocore
+openpyxl

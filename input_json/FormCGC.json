@@ -1,0 +1,72 @@
+{
+    "FormCGC": {
+        "primary_key_changes": {
+            "new_primary_key": "FormCGC_uid",
+            "justification": [
+                "select count(form_id) from FormCGC where created_by IS NULL --200 ROWS"
+            ]
+        },
+        "column_changes": [
+            {
+                "column": "created_by",
+                "change_type": "datatype_change",
+                "from": "VARCHAR(60)",
+                "to": "VARCHAR(100)"
+            },
+            {
+                "column": "modified_by",
+                "change_type": "datatype_change",
+                "from": "VARCHAR(60)",
+                "to": "VARCHAR(100)"
+            },
+            {
+                "column": "created_by",
+                "change_type": "null_constraint_change",
+                "from": "NULL",
+                "to": "NOT NULL"
+            },
+            {
+                "column": "date_created",
+                "change_type": "null_constraint_change",
+                "from": "NULL",
+                "to": "NOT NULL"
+            },
+            {
+                "column": "modified_by",
+                "change_type": "null_constraint_change",
+                "from": "NULL",
+                "to": "NOT NULL"
+            },
+            {
+                "column": "date_modified",
+                "change_type": "null_constraint_change",
+                "from": "NULL",
+                "to": "NOT NULL"
+            },
+            {
+                "column": "created_by",
+                "change_type": "default_value_change",
+                "from": "NONE",
+                "to": "DF constraint"
+            },
+            {
+                "column": "date_created",
+                "change_type": "default_value_change",
+                "from": "NONE",
+                "to": "DF constraint"
+            },
+            {
+                "column": "modified_by",
+                "change_type": "default_value_change",
+                "from": "NONE",
+                "to": "DF constraint"
+            },
+            {
+                "column": "date_modified",
+                "change_type": "default_value_change",
+                "from": "NONE",
+                "to": "DF constraint"
+            }
+        ]
+    }
+}

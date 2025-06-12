@@ -1,0 +1,314 @@
+﻿
+--/************************************************************
+--Procedure	: sp_FormWCR_Select
+--Database	: PLT_AI*
+--Created		: 5-10-2004 - Jonathan Broome
+--Description	: Selects FormWCR records for the
+--			  matching form_id + revision_id.
+--12/16/2004 JPB Modified to return Generator_id and EPA_ID
+--************************************************************/
+--Create Procedure sp_FormWCR_Select (
+--@form_id							int,
+--@revision_id						int,
+--@group_id							int = NULL,
+--@customer_id_from_form				int = NULL,
+--@customer_id						int	= NULL
+--)
+--as
+
+--set nocount on
+
+--declare
+--	@selected_companies varchar(8000),
+--	@tmpform_id int,
+--	@tmprevision_id int
+
+--set @tmpform_id = @form_id
+--set @tmprevision_id = @revision_id
+
+--if datalength(@form_id) = 0
+--begin
+--	set rowcount 1
+--	select
+--		@tmpform_id = form_id,
+--		@tmprevision_id = revision_id
+--		from FormWCR
+--		where
+--			(form_id = @form_id and revision_id = @revision_id)
+--			or (group_id = @group_id and @group_id is not null)
+--		order by form_id desc
+--	set rowcount 0
+--end
+
+--select @selected_companies = coalesce(@selected_companies + ',', '') +
+
+--	right('00' + convert(varchar(2), company_id), 2) +
+--	right('00' + convert(varchar(2), profit_ctr_id), 2)
+--	from FormXProfitCenter
+--	where
+--		form_id = @tmpform_id
+--		and revision_id = @tmprevision_id
+--	order by
+--		company_id, profit_ctr_id
+
+--set nocount off
+
+--select
+--	form_id,
+--	revision_id,
+--	group_id,
+--	customer_id_from_form,
+--	customer_id,
+--	form_version,
+--	app_id,
+--	tracking_id,
+--	status,
+--	locked,
+--	signed_pin,
+--	signing_name,
+--	signing_company,
+--	signing_title,
+--	signing_date,
+--	date_created,
+--	date_modified,
+--	created_by,
+--	modified_by,
+--	comments,
+--	sample_id,
+--	cust_name,
+--	cust_addr1,
+--	cust_addr2,
+--	cust_addr3,
+--	cust_addr4,
+--	cust_city,
+--	cust_state,
+--	cust_zip,
+--	cust_country,
+--	inv_contact_name,
+--	inv_contact_phone,
+--	inv_contact_fax,
+--	tech_contact_name,
+--	tech_contact_phone,
+--	tech_contact_fax,
+--	tech_contact_mobile,
+--	tech_contact_pager,
+--	tech_cont_email,
+--	generator_id,
+--	epa_id,
+--	sic_code,
+--	generator_name,
+--	generator_address1,
+--	generator_address2,
+--	generator_address3,
+--	generator_address4,
+--	generator_city,
+--	generator_state,
+--	generator_zip,
+--	generator_county_id,
+--	generator_county_name,
+--	gen_mail_address1,
+--	gen_mail_address2,
+--	gen_mail_address3,
+--	gen_mail_city,
+--	gen_mail_state,
+--	gen_mail_zip,
+--	generator_contact,
+--	generator_contact_title,
+--	generator_phone,
+--	generator_fax,
+--	waste_common_name,
+--	volume,
+--	frequency,
+--	dot_shipping_name,
+--	surcharge_exempt,
+--	pack_bulk_solid_yard,
+--	pack_bulk_solid_ton,
+--	pack_bulk_liquid,
+--	pack_totes,
+--	pack_totes_size,
+--	pack_cy_box,
+--	pack_drum,
+--	pack_other,
+--	pack_other_desc,
+--	color,
+--	odor,
+--	poc,
+--	consistency_solid,
+--	consistency_dust,
+--	consistency_liquid,
+--	consistency_sludge,
+--	ph,
+--	ph_lte_2,
+--	ph_gt_2_lt_5,
+--	ph_gte_5_lte_10,
+--	ph_gt_10_lt_12_5,
+--	ph_gte_12_5,
+--	ignitability,
+--	waste_contains_spec_hand_none,
+--	free_liquids,
+--	oily_residue,
+--	metal_fines,
+--	biodegradable_sorbents,
+--	amines,
+--	ammonia,
+--	dioxins,
+--	furans,
+--	biohazard,
+--	shock_sensitive_waste,
+--	reactive_waste,
+--	radioactive_waste,
+--	explosives,
+--	pyrophoric_waste,
+--	isocyanates,
+--	asbestos_friable,
+--	asbestos_no_friable,
+--	gen_process,
+--	rcra_listed,
+--	rcra_listed_comment,
+--	rcra_characteristic,
+--	rcra_characteristic_comment,
+--	state_waste_code_flag,
+--	state_waste_code_flag_comment,
+--	wastewater_treatment,
+--	exceed_ldr_standards,
+--	meets_alt_soil_treatment_stds,
+--	more_than_50_pct_debris,
+--	oxidizer,
+--	react_cyanide,
+--	react_sulfide,
+--	info_basis,
+--	D004,
+--	D005,
+--	D006,
+--	D007,
+--	D008,
+--	D009,
+--	D010,
+--	D011,
+--	D012,
+--	D013,
+--	D014,
+--	D015,
+--	D016,
+--	D017,
+--	D018,
+--	D019,
+--	D020,
+--	D021,
+--	D022,
+--	D023,
+--	D024,
+--	D025,
+--	D026,
+--	D027,
+--	D028,
+--	D029,
+--	D030,
+--	D031,
+--	D032,
+--	D033,
+--	D034,
+--	D035,
+--	D036,
+--	D037,
+--	D038,
+--	D039,
+--	D040,
+--	D041,
+--	D042,
+--	D043,
+--	D004_concentration,
+--	D005_concentration,
+--	D006_concentration,
+--	D007_concentration,
+--	D008_concentration,
+--	D009_concentration,
+--	D010_concentration,
+--	D011_concentration,
+--	D012_concentration,
+--	D013_concentration,
+--	D014_concentration,
+--	D015_concentration,
+--	D016_concentration,
+--	D017_concentration,
+--	D018_concentration,
+--	D019_concentration,
+--	D020_concentration,
+--	D021_concentration,
+--	D022_concentration,
+--	D023_concentration,
+--	D024_concentration,
+--	D025_concentration,
+--	D026_concentration,
+--	D027_concentration,
+--	D028_concentration,
+--	D029_concentration,
+--	D030_concentration,
+--	D031_concentration,
+--	D032_concentration,
+--	D033_concentration,
+--	D034_concentration,
+--	D035_concentration,
+--	D036_concentration,
+--	D037_concentration,
+--	D038_concentration,
+--	D039_concentration,
+--	D040_concentration,
+--	D041_concentration,
+--	D042_concentration,
+--	D043_concentration,
+--	underlying_haz_constituents,
+--	michigan_non_haz,
+--	michigan_non_haz_comment,
+--	universal,
+--	recyclable_commodity,
+--	recoverable_petroleum_product,
+--	used_oil,
+--	pcb_concentration,
+--	pcb_source_concentration_gr_50,
+--	processed_into_non_liquid,
+--	processd_into_nonlqd_prior_pcb,
+--	pcb_non_lqd_contaminated_media,
+--	pcb_manufacturer,
+--	pcb_article_decontaminated,
+--	ccvocgr500,
+--	benzene,
+--	neshap_sic,
+--	tab_gr_10,
+--	avg_h20_gr_10,
+--	tab,
+--	benzene_gr_1,
+--	benzene_concentration,
+--	benzene_unit,
+--	fuel_blending,
+--	btu_per_lb,
+--	pct_chlorides,
+--	pct_moisture,
+--	pct_solids,
+--	intended_for_reclamation
+--from FormWCR
+--where
+--	(customer_id_from_form = @customer_id_from_form or customer_id = @customer_id)
+--	and
+--	(
+--	(form_id = @form_id and revision_id = @revision_id)
+--	or
+--	(group_id = @group_id and @group_id is not null)
+--	)
+
+--GO
+--GRANT EXECUTE
+--    ON OBJECT::[dbo].[sp_FormWCR_Select] TO [EQWEB]
+--    AS [dbo];
+--GO
+--GRANT EXECUTE
+--    ON OBJECT::[dbo].[sp_FormWCR_Select] TO [COR_USER]
+--    AS [dbo];
+
+
+
+--GO
+--GRANT EXECUTE
+--    ON OBJECT::[dbo].[sp_FormWCR_Select] TO [EQAI]
+--    AS [dbo];
+

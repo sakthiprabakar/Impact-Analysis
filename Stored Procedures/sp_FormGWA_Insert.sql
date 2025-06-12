@@ -1,0 +1,163 @@
+﻿
+--/************************************************************
+--Procedure	: sp_FormGWA_Insert
+--Database	: PLT_AI*
+--Created		: 5-10-2004 - Jonathan Broome
+--Description	: Inserts waste information
+--			  into the FormGWA table.
+--12/16/2004 JPB Modified to take Generator_id and EPA_ID
+-- 07/08/2019	JPB	Cust_name: 40->75 / Generator_Name: 40->75
+--************************************************************/
+--Create Procedure sp_FormGWA_Insert (
+--@form_id						int,
+--@revision_id					int,
+--@group_id						int 			= NULL,
+--@customer_id_from_form			int				= NULL,
+--@customer_id					int				= NULL,
+--@selected_companies				varchar(8000),
+--@form_version					char(10) 		= NULL,
+--@app_id							varchar(20)		= NULL,
+--@status							char(1),
+--@locked							char(1),
+--@signed_pin						char(10) 		= NULL,
+--@signing_name					varchar(40) 	= NULL,
+--@signing_company				varchar(40) 	= NULL,
+--@signing_title					varchar(40) 	= NULL,
+--@signing_date					datetime 		= NULL,
+--@username						char(10) 		= NULL,
+--@approval						varchar(20) 	= NULL,
+--@generator_name					varchar(40) 	= NULL,
+--@epa_id							varchar(12) 	= NULL,
+--@generator_id					int			 	= NULL,
+--@generator_address1				varchar(40) 	= NULL,
+--@cust_name						varchar(75) 	= NULL,
+--@cust_addr1						varchar(75) 	= NULL,
+--@inv_contact_name				varchar(40) 	= NULL,
+--@inv_contact_phone				varchar(20) 	= NULL,
+--@inv_contact_fax				varchar(10) 	= NULL,
+--@tech_contact_name				varchar(40) 	= NULL,
+--@tech_contact_phone				varchar(20) 	= NULL,
+--@tech_contact_fax				varchar(10) 	= NULL,
+--@waste_common_name				varchar(50) 	= NULL,
+--@waste_code_comment				text			= NULL,
+--@amendment						text 			= NULL
+--)
+--as
+
+--DECLARE
+--	@pos int,
+--	@company_profitcenter varchar(30),
+--	@tmp_list varchar(8000)
+
+--exec('sp_FormXProfitCenter_Delete ' + @form_id + ', ' + @revision_id)
+
+--set @tmp_list = replace(@selected_companies, ' ', '')
+--set @pos = 0
+
+--WHILE datalength(@tmp_list) > 0
+--BEGIN
+--	select @pos = CHARINDEX(',', @tmp_list)
+--	if @pos > 0
+--	begin
+--		select @company_profitcenter = SUBSTRING(@tmp_list, 1, @pos - 1)
+--		select @tmp_list = SUBSTRING(@tmp_list, @pos + 1, datalength(@tmp_list) - @pos)
+--	end
+--	if @pos = 0
+--	begin
+--		select @company_profitcenter = @tmp_list
+--		select @tmp_list = NULL
+--	end
+--	exec('sp_FormXProfitCenter_Insert ' + @form_id + ', ' + @revision_id + ', ''' + @company_profitcenter + '''')
+--END
+
+--insert FormGWA (
+--	form_id,
+--	revision_id,
+--	group_id,
+--	customer_id_from_form,
+--	customer_id,
+--	form_version,
+--	app_id,
+--	status,
+--	locked,
+--	signed_pin,
+--	signing_name,
+--	signing_company,
+--	signing_title,
+--	signing_date,
+--	date_created,
+--	date_modified,
+--	created_by,
+--	modified_by,
+--	approval,
+--	generator_name,
+--	epa_id,
+--	generator_id,
+--	generator_address1,
+--	cust_name,
+--	cust_addr1,
+--	inv_contact_name,
+--	inv_contact_phone,
+--	inv_contact_fax,
+--	tech_contact_name,
+--	tech_contact_phone,
+--	tech_contact_fax,
+--	waste_common_name,
+--	waste_code_comment,
+--	amendment,
+--	rowguid
+--) values (
+--	@form_id,
+--	@revision_id,
+--	@group_id,
+--	@customer_id_from_form,
+--	@customer_id,
+--	@form_version,
+--	@app_id,
+--	@status,
+--	@locked,
+--	@signed_pin,
+--	@signing_name,
+--	@signing_company,
+--	@signing_title,
+--	@signing_date,
+--	GETDATE(),
+--	GETDATE(),
+--	@username,
+--	@username,
+--	@approval,
+--	@generator_name,
+--	@epa_id,
+--	@generator_id,
+--	@generator_address1,
+--	@cust_name,
+--	@cust_addr1,
+--	@inv_contact_name,
+--	@inv_contact_phone,
+--	@inv_contact_fax,
+--	@tech_contact_name,
+--	@tech_contact_phone,
+--	@tech_contact_fax,
+--	@waste_common_name,
+--	@waste_code_comment,
+--	@amendment,
+--	newID()
+--)
+
+
+--GO
+--GRANT EXECUTE
+--    ON OBJECT::[dbo].[sp_FormGWA_Insert] TO [EQWEB]
+--    AS [dbo];
+--GO
+--GRANT EXECUTE
+--    ON OBJECT::[dbo].[sp_FormGWA_Insert] TO [COR_USER]
+--    AS [dbo];
+
+
+
+--GO
+--GRANT EXECUTE
+--    ON OBJECT::[dbo].[sp_FormGWA_Insert] TO [EQAI]
+--    AS [dbo];
+

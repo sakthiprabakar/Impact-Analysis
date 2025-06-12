@@ -1,0 +1,36 @@
+{
+    "CustomerBillingEIRRate": {
+        "primary_key_changes": {
+            "new_primary_key": "customerbillingeirrate_uid",
+            "justification": [
+                "The CustomerBilling_uid column would be useful for establishing a relationship to customerbilling."
+            ]
+        },
+        "column_changes": [
+            {
+                "column": "modified_by",
+                "change_type": "datatype_change",
+                "from": "varchar(10)",
+                "to": "varchar(100)"
+            },
+            {
+                "column": "added_by",
+                "change_type": "datatype_change",
+                "from": "varchar(10)",
+                "to": "varchar(100)"
+            },
+            {
+                "column": "CustomerBilling_uid",
+                "change_type": "new_column",
+                "from": null,
+                "to": "foreign_key"
+            },
+            {
+                "column": "customer_id",
+                "change_type": "new_column",
+                "from": null,
+                "to": "foreign_key"
+            }
+        ]
+    }
+}

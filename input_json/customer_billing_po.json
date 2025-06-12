@@ -1,0 +1,63 @@
+{
+    "customer_billing_po": {
+        "primary_key_changes": {
+            "new_primary_key": "CustomerBillingPO_uid",
+            "justification": [
+                "New column created as primary key"
+            ]
+        },
+        "column_changes": [
+            {
+                "column": "modified_by",
+                "change_type": "datatype_change",
+                "from": "varchar(10)",
+                "to": "varchar(100)"
+            },
+            {
+                "column": "added_by",
+                "change_type": "datatype_change",
+                "from": "varchar(10)",
+                "to": "varchar(100)"
+            }
+        ],
+        "foreign_key_changes": [
+            {
+                "column": "CustomerBilling_uid",
+                "change_type": "new_foreign_key",
+                "justification": [
+                    "select b.billing_project_id, b.customer_id, c.cust_name from CustomerBillingPO as b left join Customer as c on b.customer_id = c.customer_ID where c.cust_name IS NULL --0 rows",
+                    "select f.billing_project_id, f.customer_id, b.billing_project_id from CustomerBillingPO as f left join CustomerBilling as b on f.customer_id = b.customer_ID and f.billing_project_id = b.billing_project_id where b.billing_project_id IS NULL or b.customer_ID IS NULL --0 rows"
+                ]
+            },
+            {
+                "column": "customer_id",
+                "change_type": "new_foreign_key",
+                "justification": []
+            }
+        ],
+        "not_null_constraints": [
+            {
+                "column": "added_by",
+                "constraint": "NOT NULL"
+            },
+            {
+                "column": "date_added",
+                "constraint": "NOT NULL"
+            },
+            {
+                "column": "modified_by",
+                "constraint": "NOT NULL"
+            },
+            {
+                "column": "date_modified",
+                "constraint": "NOT NULL"
+            }
+        ],
+        "deletion_of_columns": [
+            {
+                "column": "Rowguid",
+                "justification": "Rowguid column is of no use, so it can be removed"
+            }
+        ]
+    }
+}

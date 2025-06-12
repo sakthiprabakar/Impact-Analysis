@@ -1,0 +1,62 @@
+FormCopySource: 
+
+Existing:                                                                       Proposed:  
+
+ 
+
+ 
+
+Implementing Primary Key & Foreign Key 
+
+formcopysource_uid 
+
+ORIGINAL PK 
+
+ 
+
+Replacement of Existing Columns & Data Types 
+
+added_by 
+
+DATATYPE VARCHAR (10) -> VARCHAR (100) 
+
+modified_by 
+
+DATATYPE VARCHAR (10) -> VARCHAR (100) 
+
+Applying Null/Not Null Constraint 
+
+added_by 
+
+NOT NULL 
+
+date_added 
+
+NOT NULL 
+
+modified_by 
+
+NOT NULL 
+
+date_modified 
+
+NOT NULL 
+
+Applying Default Values 
+
+added_by 
+
+DEFAULT SYSTEM_USER 
+
+date_added 
+
+DEFAULT GETDATE() 
+
+modified_by 
+
+DEFAULT SYSTEM_USER 
+
+date_modified 
+
+DEFAULT GETDATE() 
+

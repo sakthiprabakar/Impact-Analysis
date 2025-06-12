@@ -1,0 +1,25 @@
+Standardization of Table FormAudit:
+
+Existing:                                                                       Proposed:
+
+
+Implementing Primary Key & Foreign Key
+
+FormAudit_uid
+
+NEW IDENTITY COLUMN/NEW PRIMARY KEY
+
+
+
+Replacement of Existing Columns & Data Types
+
+added_by
+
+DATATYPE 60 -> 100
+
+Deletion of Existing Column
+
+rowguid
+
+DROP COLUMN
+

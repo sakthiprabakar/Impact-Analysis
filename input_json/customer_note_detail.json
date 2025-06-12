@@ -1,0 +1,45 @@
+{
+    "customer_note_detail": {
+        "primary_key_changes": {
+            "new_primary_key": "detail_ID",
+            "justification": [
+                "Foreign key customer_id added to establish relationship with Customer table.",
+                "Foreign key note_ID added to establish relationship with Note table."
+            ]
+        },
+        "column_changes": [
+            {
+                "column": "added_by",
+                "change_type": "datatype_change",
+                "from": "varchar(10)",
+                "to": "varchar(100)"
+            },
+            {
+                "column": "note",
+                "change_type": "datatype_change",
+                "from": "text",
+                "to": "varchar(4000)"
+            }
+        ],
+        "null_not_null_constraints": [
+            {
+                "column": "added_by",
+                "constraint": "NOT NULL"
+            },
+            {
+                "column": "date_added",
+                "constraint": "NOT NULL"
+            }
+        ],
+        "new_columns": [
+            "modified_by",
+            "date_modified"
+        ],
+        "deleted_columns": [
+            {
+                "column": "Rowguid",
+                "justification": "Rowguid column is of no use, so it can be removed."
+            }
+        ]
+    }
+}

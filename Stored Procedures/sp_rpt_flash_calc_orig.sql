@@ -1,0 +1,3360 @@
+﻿--CREATE PROCEDURE [sp_rpt_flash_calc_orig]
+--	@copc_list				VARCHAR(MAX),
+--	@date_from				DATETIME = NULL,
+--	@date_to				DATETIME = NULL,
+--	@cust_id_from			INT,
+--	@cust_id_to				INT,
+--	@invoice_flag			VARCHAR(MAX),  /* 'I'nvoiced, 'N'ot invoiced. */
+--	@source_list			VARCHAR(MAX),  /* 'R'eceipt, 'W'orkorder */
+--	@copc_search_type		char(1) = 'T', /* 'T'ransaction facility (native, default) or 'D'istribution facility */
+--	@transaction_type		char(1) = 'A', /* 'A'll, 'N'ative only (or Not split), 'S'plit between facilities only */
+--	@debug_flag				INT = 0
+--AS
+--/*********************************************************************************************
+--sp_rpt_flash_calc
+
+--IMPORTANT:
+--	Changes to sp_billing_submit affect this stored procedure - this has to be updated too!
+--	Changes to sp_billing_submit_calc_receipt_charges affect this stored procedure - this has to be changed too!
+--	Changes to sp_billing_submit_calc_surcharges_billingdetail affect this stored procedure - this has to be changed too!
+	
+--	Changes to sp_flash_calc affect sp_report_eqip_flash_detail.
+	
+--	It's a whole big, "Circle of life" thing.
+
+--03/23/2011 JPB	Created as a copy of sp_rpt_territory_calc_ai
+--01/23/2012 JPB	Updated per GL Standardization
+--01/23/2012 JPB	Added copc_search_type, @transaction_type options.
+--				Changed WO Pricing to use fn.
+--01/27/2012 JPB	Per Talk with JDB & LT, changes:
+--					- You can run for Invoiced OR not invoiced, not both
+--					- Invoiced runs compare dates against Invoice Date
+--					- Not Invoiced runs compare dates against transaction date.
+--01/31/2012 JPB		- Fix to GL's with XX needing 0-padded co/pc.
+--03/16/2012 JDB	Added the use of sp_billing_submit_calc_surcharges_billingdetail for calculating
+--				the surcharges/taxes on receipts and work orders.
+--03/15/2013 JPB	Updated #Billing* temp table field lists to match new schemas used in sp_billing_submit
+--					that were updated with JDE integration fields
+--04/08/2013 JDB	Updated the insert into #BillingDetail for work orders to calculate the GL account properly.
+
+
+--/*
+--Missing Index Details from sp_rpt_flash_calc.sql - NTSQL1dev.Plt_AI (jonathan (51))
+--The Query Processor estimates that implementing the following index could improve the query cost by 26.9087%.
+--*/
+
+--/*
+--USE [Plt_AI]
+--G O
+--CREATE NONCLUSTERED INDEX [idx_BillingDetail_trans_source]
+--ON [dbo].[BillingDetail] ([trans_source])
+--INCLUDE ([billing_type],[company_id],[profit_ctr_id],[receipt_id],[line_id],[price_id],[dist_company_id],[dist_profit_ctr_id],[extended_amt],[gl_account_code])
+--G O
+--*/
+
+---- existing non-clustered billingdetail index: receipt_id, line_id, price_id, trans_source, profit_ctr_id, company_id, billing_type
+---- new index:
+---- create index idx_receipt_id on BillingDetail (receipt_id, profit_ctr_id, company_id)
+---- new index:
+---- create index idx_receipt_id on Billing (receipt_id, profit_ctr_id, company_id)
+
+
+---- DROP TABLE #FlashWork
+---- G O
+---- DROP TABLE #FlashWorkSplit
+---- G O
+----
+
+
+--CREATE TABLE #FlashWork (
+
+--	--	Header info:
+--		company_id					int			NULL,
+--		profit_ctr_id				int			NULL,
+--		trans_source				char(2)		NULL,	--	Receipt,	Workorder,	Workorder-Receipt,	etc
+--		receipt_id					int			NULL,	--	Receipt/Workorder	ID
+--		trans_type					char(1)		NULL,	--	Receipt	trans	type	(O/I)
+--		link_flag					char(1)		NULL,	--  if R/WO, is this linked to a WO/R? T/F
+--		linked_record				varchar(255)	NULL,	-- if R, list of WO's linked to (prob. just 1, but multiple poss.)
+--		workorder_type				varchar(40)	NULL,	--	WorkOrderType.account_desc
+--		trans_status				char(1)		NULL,	--	Receipt	or	Workorder	Status
+--		status_description			varchar(40) NULL,	--  Billing/Transaction Status (Invoiced, Billing Validated, Accepted, etc)
+--		trans_date					datetime	NULL,	--	Receipt	Date	or	Workorder	End	Date
+--		submitted_flag				char(1)		NULL,	--	Submitted	Flag
+--		billing_status_code			char(1)		NULL,	--  Billing Status Code
+--		territory_code				varchar(8)	NULL,	--	Billing	Project	Territory	code
+--		billing_project_id			int			NULL,	--	Billing	project	ID
+--		billing_project_name		varchar(40)	NULL,	--	Billing	Project	Name
+--		invoice_flag				char(1)		NULL,	--  'T'/'F' (Invoiced/Not Invoiced)
+--		invoice_code				varchar(16)	NULL,	--	Invoice	Code	(if	invoiced)
+--		invoice_date				datetime	NULL,	--	Invoice	Date	(if	invoiced)
+--		invoice_month				int			NULL,	--	Invoice	Date	month
+--		invoice_year				int			NULL,	--	Invoice	Date	year
+--		customer_id					int			NULL,	--	Customer	ID	on	Receipt/Workorder
+--		cust_name					varchar(40)	NULL,	--	Customer	Name
+
+--	--	Detail info:
+--		line_id						int			NULL,	--	Receipt	line	id
+--		price_id					int			NULL,	--	Receipt	line	price	id
+--		ref_line_id					int			NULL,	--	Billing	reference	line_id	(which	line	does	this	refer	to?)
+--		workorder_sequence_id		varchar(15)	NULL,	--	Workorder	sequence	id
+--		workorder_resource_item		varchar(15)	NULL,	--	Workorder	Resource	Item
+--		workorder_resource_type		varchar(15)	NULL,	--	Workorder	Resource	Type
+--		Workorder_resource_category	Varchar(40)	NULL,	--	Workorder	Resource	Category
+--		quantity					float		NULL,	--	Receipt/Workorder	Quantity
+--		billing_type				varchar(20)	NULL,	--	'Energy',	'Insurance',	'Salestax'	etc.
+--		dist_flag					char(1)		NULL,	--	'D', 'N' (Distributed/Not Distributed -- if the dist co/pc is diff from native co/pc, this is D)
+--		dist_company_id				int			NULL,	--	Distribution	Company	ID	(which	company	receives	the	revenue)
+--		dist_profit_ctr_id			int			NULL,	--	Distribution	Profit	Ctr	ID	(which	profitcenter	receives	the	revenue)
+--		gl_account_code				varchar(12)	NULL,	--	GL	Account	for	the	revenue
+--		gl_native_code				varchar(5)	NULL,	--	GL Native code (first 5 characters)
+--		gl_dept_code				varchar(3)	NULL,	--	GL Dept (last 3 characters)
+--		extended_amt				float			NULL,	--	Revenue	amt
+--		generator_id				int			NULL,	--	Generator	ID
+--		generator_name				varchar(40)	NULL,	--	Generator	Name
+--		epa_id						varchar(12)	NULL,	--	Generator	EPA	ID
+--		treatment_id				int			NULL,	--	Treatment	ID
+--		treatment_desc				varchar(32)	NULL,	--	Treatment's	treatment_desc
+--		treatment_process_id		int			NULL,	--	Treatment's	treatment_process_id
+--		treatment_process			varchar(30)	NULL,	--	Treatment's	treatment_process	(desc)
+--		disposal_service_id			int			NULL,	--	Treatment's	disposal_service_id
+--		disposal_service_desc		varchar(20)	NULL,	--	Treatment's	disposal_service_desc
+--		wastetype_id				int			NULL,	--	Treatment's	wastetype_id
+--		wastetype_category			varchar(40)	NULL,	--	Treatment's	wastetype	category
+--		wastetype_description		varchar(60)	NULL,	--	Treatment's	wastetype	description
+--		bill_unit_code				varchar(4)	NULL,	--	Unit
+--		waste_code					varchar(4)	NULL,	--	Waste	Code
+--		profile_id					int			NULL,	--	Profile_id
+--		quote_id					int			NULL,	--	Quote	ID
+--		product_id					int			NULL,	--	BillingDetail	product_id,	for	id'ing	fees,	etc.
+--		product_code				varchar(15)	NULL,	-- Product Code
+--		approval_code				varchar(40)	NULL,	--	Approval	Code
+--		approval_desc				varchar(60) NULL,
+--		TSDF_code					Varchar(15)	NULL,	--	TSDF	Code
+--		TSDF_EQ_FLAG				Char(1)		NULL,	--	TSDF:	Is	this	an	EQ	tsdf?
+--		fixed_price_flag			char(1)		NULL,	--	Fixed	Price	Flag
+--		pricing_method				char(1)		NULL,	--	Calculated,	Actual,	etc.
+--		quantity_flag				char(1)		NULL	--	T	=	has	quantities,	F	=	no	quantities,	so	0	used.
+--	)
+
+--truncate table #FlashWork
+
+--EXEC sp_rpt_flash_calc
+--	@copc_list			= '25|0',
+--	@date_from			= '1/1/2013', --'3/31/2013',
+--	@date_to			= '3/31/2013', --'10/31/2011',
+--	@cust_id_from		= 0,
+--	@cust_id_to			= 999999,
+--	@invoice_flag		= 'N',
+--	@source_list		= 'W',		--'R,W,O',
+--	@copc_search_type	= 'T', /* 'T'ransaction facility (native, default) or 'D'istribution facility */
+--	@transaction_type	= 'A', /* 'A'll, 'N'ative only (or Not split), 'S'plit between facilities only */
+--	@debug_flag			= 1
+
+--SELECT * FROM workorderheader where workorder_id  = 15580900
+--SELECT * FROM WorkOrderDetail wod where workorder_id  = 15580900
+
+--SELECT * FROM #FlashWork where receipt_id = 172387
+
+--SELECT * FROM billing where receipt_id = 992 and company_id = 29
+--sp_report_eqip_flash_detail '1/21/2012','2/12/2012', 'RICH_G', 89, '22|2', 0,999999,'N','R,W,O', 'E'
+
+
+---- find a not-billed receipt that should have split revenue. Test it.
+--SELECT TOP 10 * FROM    receipt where company_id = 22 and profit_ctr_id = 0 and submitted_flag = 'T'
+--and receipt_date > '12/1/2011' and customer_id = 10673 and receipt_date < getdate()
+--AND Receipt.fingerpr_status IN ('W', 'H', 'A')		/* Wait, Hold, Accepted */
+--AND Receipt.receipt_status NOT IN ('V','R','T','X')
+--order by receipt_date desc
+
+--SELECT * FROM BillingLinkLookup bll where receipt_id = 842227
+
+---- Compare #FlashWork to Receipt for it.
+--SELECT * FROM #FlashWork where receipt_id = 842227
+
+--WITH #Billing section...
+--select * from receipt where profile_id in (
+--	select profile_id from profile where customer_id = 10673 and curr_status_code = 'A' and ap_expiration_date > getdate() and profile_id in (
+--		select profile_id from ProfileQuoteDetailSplitGroup
+--	)
+--) and receipt_status not in ('L', 'V') order by receipt_date desc
+
+
+--*********************************************************************************************/
+
+--if @debug_flag > 0 select getdate() as time_now, 'Starting Proc' as status
+
+---- Setup
+----------------------------------------------------------------
+---- drop table #tmp_trans_copc
+
+--	-- Create & Populate #tmp_trans_copc
+--	CREATE TABLE #tmp_trans_copc (
+--		company_id INT NULL,
+--		profit_ctr_id INT NULL,
+--		base_rate_quote_id INT NULL
+--	)
+
+--	-- About this next part...
+--	-- Normally, we'd just say "If it's ALL, load from profitcenter. Otherwise load from the string they sent."
+--	-- Everything was a search against the Transaction company.
+--	-- But upon introducing "search by Transaction company OR Distribution company" (@copc_search_type)...
+--	-- We can't tell up front where the Distribution company records will come from, so we have to include ALL
+--	-- No matter what they picked... and filter the results later when those fields are available.
+--	-- This won't be good for performance.  Oh well.
+--	-- 1/19/2012 - JPB
+--	-- On second thought... All split info is contained in ProfileQuoteDetailSplitGroup.  That's handy.  We could
+--	-- limit the select for Distribution info to receipts containing profiles in that table for the co/pc(s)
+--	-- sought.  So leave the #tmp_trans_copc table as-was, we'll tweak the #keys section.  Oh, which doesn't exist. Hmm.
+--	-- 2/6/2012 - JPB
+
+--	IF LTRIM(RTRIM(ISNULL(@copc_list, ''))) = 'ALL' -- OR @copc_search_type = 'D'
+--		INSERT #tmp_trans_copc
+--		SELECT Profitcenter.company_id, Profitcenter.profit_ctr_id, Profitcenter.base_rate_quote_id
+--		FROM ProfitCenter
+--		WHERE ProfitCenter.status = 'A'
+--	ELSE
+--		INSERT #tmp_trans_copc
+--		SELECT Profitcenter.company_id, Profitcenter.profit_ctr_id, Profitcenter.base_rate_quote_id
+--		FROM ProfitCenter
+--		INNER JOIN (
+--			SELECT
+--				RTRIM(LTRIM(SUBSTRING(ROW, 1, CHARINDEX('|',ROW) - 1))) company_id,
+--				RTRIM(LTRIM(SUBSTRING(ROW, CHARINDEX('|',ROW) + 1, LEN(ROW) - (CHARINDEX('|',ROW)-1)))) profit_ctr_id
+--			from dbo.fn_SplitXsvText(',', 0, @copc_list)
+--			WHERE ISNULL(ROW, '') <> '') selected_copc ON
+--				ProfitCenter.company_id = selected_copc.company_id
+--				AND ProfitCenter.profit_ctr_id = selected_copc.profit_ctr_id
+--		WHERE ProfitCenter.status = 'A'
+
+--	CREATE TABLE #tmp_source (
+--		trans_source				char(1)
+--	)
+--	INSERT #tmp_source
+--	SELECT row
+--	from dbo.fn_SplitXsvText(',', 1, @source_list)
+--	WHERE isnull(row,'') <> ''
+--	-- truncate table #tmp_source
+--	-- insert #tmp_source select 'W' union select 'R'
+
+----------------------------------------------------------------
+
+---- Prepare Billing records
+--CREATE TABLE #Billing  (
+--	billing_uid				int NOT NULL IDENTITY (1,1),
+--	company_id				smallint NOT NULL,
+--	profit_ctr_id			smallint NOT NULL,
+--	trans_source			char (1) NULL,
+--	receipt_id				int NULL,
+--	line_id					int NULL,
+--	price_id				int NULL,
+--	status_code				char (1) NULL,
+--	billing_date			datetime NULL,
+--	customer_id				int NULL,
+--	waste_code				varchar (4) NULL,
+--	bill_unit_code			varchar (4) NULL,
+--	vehicle_code			varchar (10) NULL,
+--	generator_id			int NULL,
+--	generator_name			varchar (40) NULL,
+--	approval_code			varchar (15) NULL,
+--	time_in					datetime NULL,
+--	time_out				datetime NULL,
+--	tender_type 			char (1) NULL,
+--	tender_comment			varchar (60) NULL,
+--	quantity				float NULL,
+--	price					money NULL,
+--	add_charge_amt			money NULL,
+--	orig_extended_amt		money NULL,
+--	discount_percent		float NULL,
+--	--gl_account_code			varchar (32) NULL,
+--	--gl_sr_account_code		varchar (32) NULL,
+--	gl_account_type			char (1) NULL,
+--	gl_sr_account_type		char (1) NULL,
+--	sr_type_code			char (1) NULL,
+--	sr_price				money NULL,
+--	waste_extended_amt		money NULL,
+--	sr_extended_amt			money NULL,
+--	total_extended_amt		money NULL,
+--	cash_received			money NULL,
+--	manifest				varchar (15) NULL,
+--	shipper					varchar (15) NULL,
+--	hauler					varchar (20) NULL,
+--	source					varchar (15) NULL,
+--	truck_code				varchar (10) NULL,
+--	source_desc				varchar (25) NULL,
+--	gross_weight			int NULL,
+--	tare_weight				int NULL,
+--	net_weight				int NULL,
+--	cell_location			varchar (15) NULL,
+--	manual_weight_flag		char (1) NULL,
+--	manual_price_flag		char (1) NULL,
+--	price_level				char (1) NULL,
+--	comment					varchar (60) NULL,
+--	operator				varchar (10) NULL,
+--	workorder_resource_item	varchar (15) NULL,
+--	workorder_invoice_break_value	varchar (15) NULL,
+--	workorder_resource_type	varchar (15) NULL,
+--	workorder_sequence_id	varchar (15) NULL,
+--	purchase_order			varchar (20) NULL,
+--	release_code			varchar (20) NULL,
+--	cust_serv_auth			varchar (15) NULL,
+--	taxable_mat_flag		char (1) NULL,
+--	license					varchar (10) NULL,
+--	payment_code			varchar (13) NULL,
+--	bank_app_code			varchar (13) NULL,
+--	number_reprints			smallint NULL,
+--	void_status				char (1) NULL,
+--	void_reason				varchar (60) NULL,
+--	void_date				datetime NULL,
+--	void_operator			varchar (8) NULL,
+--	date_added				datetime NULL,
+--	date_modified			datetime NULL,
+--	added_by				varchar (10) NULL,
+--	modified_by				varchar (10) NULL,
+--	trans_type				char (1) NULL,
+--	ref_line_id				int NULL,
+--	service_desc_1			varchar (60) NULL,
+--	service_desc_2			varchar (60) NULL,
+--	cost					money NULL,
+--	secondary_manifest		varchar (15) NULL,
+--	insr_percent			money NULL,
+--	insr_extended_amt		money NULL,
+--	--gl_insr_account_code	varchar(32),
+--	ensr_percent			money NULL,
+--	ensr_extended_amt		money NULL,
+--	--gl_ensr_account_code	varchar(32),
+--	bundled_tran_bill_qty_flag	varchar (4) NULL,
+--	bundled_tran_price		money NULL,
+--	bundled_tran_extended_amt	money NULL,
+--	--bundled_tran_gl_account_code	varchar (32) NULL,
+--	product_id				int NULL,
+--	billing_project_id		int NULL,
+--	po_sequence_id			int NULL,
+--	invoice_preview_flag	char (1) NULL,
+--	COD_sent_flag			char (1) NULL,
+--	COR_sent_flag			char (1) NULL,
+--	invoice_hold_flag		char (1) NULL,
+--	profile_id				int NULL,
+--	reference_code			varchar(32) NULL,
+--	tsdf_approval_id		int NULL,
+--	billing_link_id			int NULL,
+--	hold_reason				varchar(255) NULL,
+--	hold_userid				varchar(10) NULL,
+--	hold_date				datetime NULL,
+--	invoice_id				int NULL,
+--	invoice_code			varchar(16) NULL,
+--	invoice_date			datetime NULL,
+--	date_delivered			datetime NULL,
+--	resource_sort			int	NULL,
+--	bill_sequence			int	NULL,
+--	quote_sequence_id		int	NULL,
+--	count_bundled			int	NULL
+--)
+
+--CREATE TABLE #BillingComment (
+--	company_id			smallint NOT NULL,
+--	profit_ctr_id		smallint NOT NULL,
+--	trans_source		char (1) NULL,
+--	receipt_id			int NULL,
+--	receipt_status		char (1) NULL,
+--	project_code		varchar (15) NULL,
+--	project_name		varchar (60) NULL,
+--	comment_1			varchar (80) NULL,
+--	comment_2			varchar (80) NULL,
+--	comment_3			varchar (80) NULL,
+--	comment_4			varchar (80) NULL,
+--	comment_5			varchar (80) NULL,
+--	added_by			varchar (8) NULL,
+--	date_added			datetime NULL,
+--	modified_by			varchar (8) NULL,
+--	date_modified		datetime NULL
+--)
+
+---- Prepare BillingDetail records
+--CREATE TABLE #BillingDetail (
+--	billingdetail_uid	int				NOT NULL IDENTITY (1,1),
+--	billing_uid			int				NOT NULL,
+--	ref_billingdetail_uid	int			NULL,
+--	billingtype_uid		int				NULL,
+--	billing_type		varchar(10)		NULL,
+--	company_id			int				NULL,
+--	profit_ctr_id		int				NULL,
+--	receipt_id			int				NULL,
+--	line_id				int				NULL,
+--	price_id			int				NULL,
+--	trans_source		char(1)			NULL,
+--	trans_type			char(1)			NULL,
+--	product_id			int				NULL,
+--	dist_company_id		int				NULL,
+--	dist_profit_ctr_id	int				NULL,
+--	sales_tax_id		int				NULL,
+--	applied_percent		decimal(18,6)	NULL,
+--	extended_amt		decimal(18,6)	NULL,
+--	gl_account_code		varchar(32)		NULL,
+--	sequence_id			int				NULL,
+--	JDE_BU				varchar(7)		NULL,
+--	JDE_object			varchar(5)		NULL
+--)
+
+---- Prepare SalesTax records
+--CREATE TABLE #SalesTax  (
+--	sales_tax_id		int				NULL
+--)
+---- declare @date_from datetime = '10/1/2011', @date_to datetime = '10/31/2011', @debug_flag int = 1, @cust_id_from int = 0, @cust_id_to int = 9999999
+
+---- Fix/Set @date_to's time.
+--IF @invoice_flag = 'I' BEGIN -- Dates are required
+--	if @date_from is null BEGIN
+--		RAISERROR 50001 '@date_from is required when running against Invoiced records.'
+--		RETURN
+--	END
+--	if @date_to is null BEGIN
+--		RAISERROR 50001 '@date_to is required when running against Invoiced records.'
+--		RETURN
+--	END
+--END ELSE BEGIN
+--	if @date_from is null set @date_from = '1/1/1900'
+--	if @date_to is null set @date_to = dateadd(yyyy, 1, getdate())
+--END
+
+--IF ISNULL(@date_to,'') <> ''
+--	IF DATEPART(hh, @date_to) = 0 SET @date_to = @date_to + 0.99999
+
+--declare @Billing_Status_Code table (
+--	status_code	char(1)
+--)
+-------------------------------------------------------------------------------------
+---- INVOICED RECORDS
+--if isnull(@invoice_flag, '') = 'I'
+--	insert @billing_status_code select 'I'
+--ELSE
+--	insert @billing_status_code select distinct status_code from billing where status_code not in ('I', 'V')
+
+---- Change of plans.  ALL cases run this, because not-invoiced records need this info too.
+-------------------------------------------------------------------------------------
+--	/*
+
+--	Population of FlashWork table:
+
+--	IN BILLING email content
+
+--	If in billing
+--		Use billing detail -
+--		Pricing method = 'A'
+--	*/
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting "In Billing (Workorder), Actual #FlashWork" Population' as status
+
+--	INSERT #FlashWork (
+--		company_id					,
+--		profit_ctr_id				,
+--		trans_source				, -- Receipt, Workorder, Workorder-Receipt, etc
+--		receipt_id					, -- Receipt/Workorder ID
+--		trans_type					, -- Receipt trans type (O/I)
+--		link_flag					,
+--		linked_record				,
+--		workorder_type				, -- WorkOrderType.account_desc
+--		trans_status				, -- Receipt or Workorder Status
+--		status_description			, -- Billing/Transaction status description
+--		trans_date					, -- Receipt Date or Workorder End Date
+--		submitted_flag				, -- Submitted Flag
+--		billing_status_code			, -- Billing Status Code
+--		territory_code				, -- Billing Project Territory code
+--		billing_project_id			, -- Billing project ID
+--		billing_project_name		, -- Billing Project Name
+--		invoice_flag				, -- Invoiced? Flag
+--		invoice_code				, -- Invoice Code (if invoiced)
+--		invoice_date				, -- Invoice Date (if invoiced)
+--		invoice_month				, -- Invoice Date month
+--		invoice_year				, -- Invoice Date year
+--		customer_id					, -- Customer ID on Receipt/Workorder
+--		cust_name					, -- Customer Name
+--		line_id						, -- Receipt line id
+--		price_id					, -- Receipt line price id
+--		ref_line_id					, -- Billing reference line_id (which line does this refer to?)
+--		workorder_sequence_id		, -- Workorder sequence id
+--		workorder_resource_item		, -- Workorder Resource Item
+--		workorder_resource_type		, -- Workorder Resource Type
+--		quantity					, -- Receipt/Workorder Quantity
+--		billing_type					, -- 'Energy', 'Insurance', 'Salestax' etc.
+--		dist_flag					, -- Distributed Transaction?
+--		dist_company_id				, -- Distribution Company ID (which company receives the revenue)
+--		dist_profit_ctr_id				, -- Distribution Profit Ctr ID (which profitcenter receives the revenue)
+--		gl_account_code				, -- GL Account for the revenue
+--		extended_amt				, -- Revenue amt
+--		generator_id				, -- Generator ID
+--		generator_name				, -- Generator Name
+--		epa_id						, -- Generator EPA ID
+--		bill_unit_code				, -- Unit
+--		waste_code					, -- Waste Code
+--		profile_id					, -- Profile_id
+--		quote_id					, -- Quote ID
+--		approval_code				, -- Approval Code
+--		approval_desc				,
+--		fixed_price_flag			, -- Fixed Price Flag
+--		pricing_method				, -- Calculated, Actual, etc.
+--		quantity_flag					-- T = has quantities, F = no quantities, so 0 used.
+--	)
+--	SELECT
+--		b.company_id,
+--		b.profit_ctr_id,
+--		b.trans_source,
+--		b.receipt_id,
+--		b.trans_type,
+--		case when exists (
+--			select 1 from billinglinklookup (nolock)
+--			where source_id = b.receipt_id 
+--			and source_company_id = b.company_id
+--			and source_profit_ctr_id = b.profit_ctr_id
+--			and link_required_flag = 'E'
+--			) then 'E' 
+--			else 
+--				case when exists (
+--					select 1 from billinglinklookup (nolock)
+--					where source_id = b.receipt_id 
+--					and source_company_id = b.company_id
+--					and source_profit_ctr_id = b.profit_ctr_id
+--					and link_required_flag <> 'E'
+--				) then 'T' else 'F' 
+--				end 
+--			end AS link_flag,
+--		null as linked_record, -- Wo's don't list these.  R's do.
+--		woth.account_desc,
+--		woh.workorder_status,
+--		case when b.status_code = 'I' then 'Invoiced' else 
+--			CASE woh.workorder_status
+--				WHEN 'A' THEN 'Accepted'
+--				WHEN 'C' THEN 'Completed'
+--				WHEN 'N' THEN 'New'
+--			END
+--		end as status_description,
+--		woh.start_date,
+--		woh.submitted_flag,
+--		b.status_code as billing_status_code,
+--		cb.territory_code,
+--		cb.billing_project_id,
+--		cb.project_name,
+--		case when b.status_code = 'I' then 'T' else 'F' end as invoice_flag,
+--		b.invoice_code,
+--		b.invoice_date,
+--		MONTH(b.invoice_date),
+--		YEAR(b.invoice_date),
+--		c.customer_id,
+--		c.cust_name,
+--		b.line_id,
+--		b.price_id,
+--		b.ref_line_id,
+--		b.workorder_sequence_id,
+--		b.workorder_resource_item,
+--		b.workorder_resource_type,
+--		b.quantity,
+--		bd.billing_type,
+--		case when bd.dist_company_id <> b.company_id or bd.dist_profit_ctr_id <> b.profit_ctr_id then 'D' else 'N' end,
+--		bd.dist_company_id,
+--		bd.dist_profit_ctr_id,
+--		bd.gl_account_code,
+--		bd.extended_amt,
+--		g.generator_id,
+--		g.generator_name,
+--		g.epa_id,
+--		b.bill_unit_code,
+--		b.waste_code,
+--		b.profile_id,
+--		woh.quote_id,
+--		b.approval_code,
+--		b.service_desc_1,
+--		woh.fixed_price_flag,
+--		'A' as pricing_method,
+--		'T' as quantity_flag
+--	FROM Billing b (nolock)
+--	INNER JOIN #tmp_source ts
+--		ON ts.trans_source = b.trans_source
+--/*
+--	INNER JOIN #tmp_trans_copc copc
+--		ON b.company_id = copc.company_id
+--		AND b.profit_ctr_id = copc.profit_ctr_id
+--*/		
+--	INNER JOIN BillingDetail bd (nolock)
+--		ON bd.billing_uid = b.billing_uid
+--	INNER JOIN customer c (nolock)
+--		ON b.customer_id = c.customer_id
+--	INNER JOIN WorkOrderHeader woh (nolock)
+--		ON b.receipt_id = woh.workorder_id
+--		AND b.company_id = woh.company_id
+--		AND b.profit_ctr_id = woh.profit_ctr_id
+--	INNER JOIN  WorkOrderTypeHeader woth (nolock)
+--		ON woh.workorder_type_id = woth.workorder_type_id
+--	LEFT OUTER JOIN CustomerBilling cb (nolock)
+--		ON b.customer_id = cb.customer_id
+--		AND ISNULL(b.billing_project_id, 0) = cb.billing_project_id
+--	LEFT OUTER JOIN generator g (nolock)
+--		ON b.generator_id = g.generator_id
+--	WHERE 1=1
+--		AND b.customer_id BETWEEN @cust_id_from AND @cust_id_to
+--		AND b.trans_source = 'W'
+--		AND b.status_code in (select status_code from @billing_status_code)
+--		and 1 = case @invoice_flag 
+--			when 'I' then case when b.invoice_date BETWEEN @date_from AND @date_to then 1 else 0 end
+--			when 'N' then case when b.billing_date BETWEEN @date_from AND @date_to then 1 else 0 end
+--			else 0
+--		end
+--		and 1 = case @copc_search_type
+--			when 'T' then case when exists (select 1 from #tmp_trans_copc where company_id = b.company_id and profit_ctr_id = b.profit_ctr_id) then 1 else 0 end
+--			when 'D' then case when exists (select 1 from #tmp_trans_copc where company_id = bd.dist_company_id and profit_ctr_id = bd.dist_profit_ctr_id) then 1 else 0 end
+--			else 0
+--		end
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished "In Billing (Workorder), Actual #FlashWork" Population' as status
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting "In Billing (Receipt), Actual #FlashWork" Population' as status
+
+--	INSERT #FlashWork (
+--		company_id					,
+--		profit_ctr_id				,
+--		trans_source				, -- Receipt, Workorder, Workorder-Receipt, etc
+--		receipt_id					, -- Receipt/Workorder ID
+--		trans_type					, -- Receipt trans type (O/I)
+--		link_flag					,
+--		linked_record				,
+--		trans_status				, -- Receipt or Workorder Status
+--		status_description			, -- Billing/Transaction status description
+--		trans_date					, -- Receipt Date or Workorder End Date
+--		submitted_flag				, -- Submitted Flag
+--		billing_status_code			, -- Billing Status Code
+--		territory_code				, -- Billing Project Territory code
+--		billing_project_id			, -- Billing project ID
+--		billing_project_name		, -- Billing Project Name
+--		invoice_flag				, -- Invoiced? Flag
+--		invoice_code				, -- Invoice Code (if invoiced)
+--		invoice_date				, -- Invoice Date (if invoiced)
+--		invoice_month				, -- Invoice Date month
+--		invoice_year				, -- Invoice Date year
+--		customer_id					, -- Customer ID on Receipt/Workorder
+--		cust_name					, -- Customer Name
+--		line_id						, -- Receipt line id
+--		price_id					, -- Receipt line price id
+--		ref_line_id					, -- Billing reference line_id (which line does this refer to?)
+--		workorder_sequence_id		, -- Workorder sequence id
+--		workorder_resource_item		, -- Workorder Resource Item
+--		workorder_resource_type		, -- Workorder Resource Type
+--		quantity					, -- Receipt/Workorder Quantity
+--		billing_type					, -- 'Energy', 'Insurance', 'Salestax' etc.
+--		dist_flag					, -- Distributed Transaction?
+--		dist_company_id				, -- Distribution Company ID (which company receives the revenue)
+--		dist_profit_ctr_id				, -- Distribution Profit Ctr ID (which profitcenter receives the revenue)
+--		gl_account_code				, -- GL Account for the revenue
+--		extended_amt				, -- Revenue amt
+--		generator_id				, -- Generator ID
+--		generator_name				, -- Generator Name
+--		epa_id						, -- Generator EPA ID
+--		treatment_id				, -- Treatment ID
+--		treatment_desc				, -- Treatment's treatment_desc
+--		treatment_process_id		, -- Treatment's treatment_process_id
+--		treatment_process			, -- Treatment's treatment_process (desc)
+--		disposal_service_id			, -- Treatment's disposal_service_id
+--		disposal_service_desc		, -- Treatment's disposal_service_desc
+--		wastetype_id				, -- Treatment's wastetype_id
+--		wastetype_category			, -- Treatment's wastetype category
+--		wastetype_description		, -- Treatment's wastetype description
+--		bill_unit_code				, -- Unit
+--		waste_code					, -- Waste Code
+--		profile_id					, -- Profile_id
+--		quote_id					, -- Quote ID
+--		product_id					, -- BillingDetail product_id, for id'ing fees, etc.
+--		product_code				, -- Product Code
+--		approval_code				, -- Approval Code
+--		approval_desc				,
+--		pricing_method				, -- Calculated, Actual, etc.
+--		quantity_flag					-- T = has quantities, F = no quantities, so 0 used.
+--	)
+--	SELECT
+--		b.company_id,
+--		b.profit_ctr_id,
+--		b.trans_source,
+--		b.receipt_id,
+--		b.trans_type,
+--		case when exists (
+--			select 1 from billinglinklookup (nolock)
+--			where receipt_id = b.receipt_id 
+--			and company_id = b.company_id
+--			and profit_ctr_id = b.profit_ctr_id
+--			and link_required_flag = 'E'
+--			) then 'E' 
+--			else 
+--				case when exists (
+--					select 1 from billinglinklookup (nolock)
+--					where receipt_id = b.receipt_id 
+--					and company_id = b.company_id
+--					and profit_ctr_id = b.profit_ctr_id
+--					and link_required_flag <> 'E'
+--				) then 'T' else 'F' 
+--				end 
+--			end AS link_flag,
+--		dbo.fn_get_linked_workorders(b.company_id, b.profit_ctr_id, b.receipt_id) as linked_record, -- Wo's don't list these.  R's do.
+--		r.receipt_status,
+--		case when b.status_code = 'I' then 'Invoiced' 
+--		else 
+--			CASE r.receipt_status
+--				WHEN 'L' THEN
+--					CASE r.fingerpr_status
+--						WHEN 'A' THEN 'Lab, Accepted'
+--						WHEN 'H' THEN 'Lab, Hold'
+--						WHEN 'W' THEN 'Lab, Waiting'
+--						ELSE 'Unknown Lab Status: ' + r.fingerpr_status
+--					END
+--				WHEN 'A' THEN 'Accepted'
+--				WHEN 'M' THEN 'Manual'
+--				WHEN 'N' THEN 'New'
+--				WHEN 'U' THEN 'Unloading'
+--				ELSE NULL
+--			END
+--		end as status_description,
+--		r.receipt_date,
+--		r.submitted_flag,
+--		b.status_code as billing_status_code,
+--		cb.territory_code,
+--		cb.billing_project_id,
+--		cb.project_name,
+--		case when b.status_code = 'I' then 'T' else 'F' end as invoice_flag,
+--		b.invoice_code,
+--		b.invoice_date,
+--		MONTH(b.invoice_date),
+--		YEAR(b.invoice_date),
+--		c.customer_id,
+--		c.cust_name,
+--		b.line_id,
+--		b.price_id,
+--		b.ref_line_id,
+--		b.workorder_sequence_id,
+--		b.workorder_resource_item,
+--		b.workorder_resource_type,
+--		b.quantity,
+--		bd.billing_type,
+--		case when bd.dist_company_id <> b.company_id or bd.dist_profit_ctr_id <> b.profit_ctr_id then 'D' else 'N' end,
+--		bd.dist_company_id,
+--		bd.dist_profit_ctr_id,
+--		bd.gl_account_code,
+--		bd.extended_amt,
+--		g.generator_id,
+--		g.generator_name,
+--		g.epa_id,
+--		t.treatment_id,
+--		t.treatment_desc,
+--		t.treatment_process_id,
+--		t.treatment_process_process,
+--		t.disposal_service_id,
+--		t.disposal_service_desc,
+--		t.wastetype_id,
+--		t.wastetype_category,
+--		t.wastetype_description,
+--		b.bill_unit_code,
+--		b.waste_code,
+--		b.profile_id,
+--		pqa.quote_id,
+--		r.product_id,
+--		r.product_code,
+--		b.approval_code,
+--		b.service_desc_1, 
+--		'A' as pricing_method,
+--		'T' as quantity_flag
+--	FROM Billing b (nolock)
+--	INNER JOIN #tmp_source ts
+--		ON ts.trans_source = b.trans_source
+--/*
+--	INNER JOIN #tmp_trans_copc copc
+--		ON b.company_id = copc.company_id
+--		AND b.profit_ctr_id = copc.profit_ctr_id
+--*/		
+--	INNER JOIN BillingDetail bd (nolock)
+--		ON bd.billing_uid = b.billing_uid
+--	INNER JOIN Receipt r (nolock)
+--		ON b.receipt_id = r.receipt_id
+--		AND b.line_id = r.line_id
+--		AND b.company_id = r.company_id
+--		AND b.profit_ctr_id = r.profit_ctr_id
+--	INNER JOIN customer c (nolock)
+--		ON b.customer_id = c.customer_id
+--	LEFT OUTER JOIN CustomerBilling cb (nolock)
+--		ON b.customer_id = cb.customer_id
+--		AND ISNULL(b.billing_project_id, 0) = cb.billing_project_id
+--	LEFT OUTER JOIN generator g (nolock)
+--		ON b.generator_id = g.generator_id
+--	LEFT OUTER JOIN profilequoteapproval pqa (nolock)
+--		ON b.profile_id = pqa.profile_id
+--		AND b.company_id = pqa.company_id
+--		AND b.profit_ctr_id = pqa.profit_ctr_id
+--	LEFT OUTER JOIN Treatment t (nolock)
+--		ON r.treatment_id = t.treatment_id
+--		AND r.company_id = t.company_id
+--		AND r.profit_ctr_id = t.profit_ctr_id
+--	WHERE 1=1
+--		AND b.customer_id BETWEEN @cust_id_from AND @cust_id_to
+--		AND b.trans_source = 'R'
+--		AND b.status_code in (select status_code from @Billing_Status_Code)
+--		and 1 = case @invoice_flag 
+--			when 'I' then case when b.invoice_date BETWEEN @date_from AND @date_to then 1 else 0 end
+--			when 'N' then case when b.billing_date BETWEEN @date_from AND @date_to then 1 else 0 end
+--			else 0
+--		end
+--		and 1 = case @copc_search_type
+--			when 'T' then case when exists (select 1 from #tmp_trans_copc where company_id = b.company_id and profit_ctr_id = b.profit_ctr_id) then 1 else 0 end
+--			when 'D' then case when exists (select 1 from #tmp_trans_copc where company_id = bd.dist_company_id and profit_ctr_id = bd.dist_profit_ctr_id) then 1 else 0 end
+--			else 0
+--		end
+		
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished "In Billing (Receipt), Actual #FlashWork" Population' as status
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting "In Billing (Orders), Actual #FlashWork" Population' as status
+
+--	INSERT #FlashWork (
+--		company_id					,
+--		profit_ctr_id				,
+--		trans_source				, -- Receipt, Workorder, Workorder-Receipt, etc
+--		receipt_id					, -- Receipt/Workorder ID
+--		trans_type					, -- Receipt trans type (O/I)
+--		trans_status				, -- Receipt or Workorder Status
+--		status_description			, -- Billing/Transaction status description
+--		trans_date					, -- Receipt Date or Workorder End Date
+--		submitted_flag				, -- Submitted Flag
+--		billing_status_code			, -- Billing Status Code
+--		territory_code				, -- Billing Project Territory code
+--		billing_project_id			, -- Billing project ID
+--		billing_project_name		, -- Billing Project Name
+--		invoice_flag				, -- Invoiced? Flag
+--		invoice_code				, -- Invoice Code (if invoiced)
+--		invoice_date				, -- Invoice Date (if invoiced)
+--		invoice_month				, -- Invoice Date month
+--		invoice_year				, -- Invoice Date year
+--		customer_id					, -- Customer ID on Receipt/Workorder
+--		cust_name					, -- Customer Name
+--		line_id						, -- Receipt line id
+--		price_id					, -- Receipt line price id
+--		ref_line_id					, -- Billing reference line_id (which line does this refer to?)
+--		workorder_sequence_id		, -- Workorder sequence id
+--		workorder_resource_item		, -- Workorder Resource Item
+--		workorder_resource_type		, -- Workorder Resource Type
+--		quantity					, -- Receipt/Workorder Quantity
+--		billing_type					, -- 'Energy', 'Insurance', 'Salestax' etc.
+--		dist_flag					, -- Distributed Transaction?
+--		dist_company_id				, -- Distribution Company ID (which company receives the revenue)
+--		dist_profit_ctr_id				, -- Distribution Profit Ctr ID (which profitcenter receives the revenue)
+--		gl_account_code				, -- GL Account for the revenue
+--		extended_amt				, -- Revenue amt
+--		generator_id				, -- Generator ID
+--		generator_name				, -- Generator Name
+--		epa_id						, -- Generator EPA ID
+--		bill_unit_code				, -- Unit
+--		waste_code					, -- Waste Code
+--		profile_id					, -- Profile_id
+--		quote_id					, -- Quote ID
+--		product_id					, -- BillingDetail product_id, for id'ing fees, etc.
+--		product_code				, -- Product Code
+--		approval_code				, -- Approval Code
+--		approval_desc				,
+--		pricing_method				, -- Calculated, Actual, etc.
+--		quantity_flag					-- T = has quantities, F = no quantities, so 0 used.
+--	)
+--	SELECT
+--		b.company_id,
+--		b.profit_ctr_id,
+--		b.trans_source,
+--		b.receipt_id,
+--		b.trans_type,
+--		oh.status,
+--		case when b.status_code = 'I' then 'Invoiced' 
+--		else 
+--			case oh.status
+--				WHEN 'P' then 'Processed'
+--				WHEN 'V' then 'Void'
+--				WHEN 'N' then 'New'
+--			end
+--		end as status_description,
+--		oh.order_date,
+--		oh.submitted_flag,
+--		b.status_code as billing_status_code,
+--		cb.territory_code,
+--		cb.billing_project_id,
+--		cb.project_name,
+--		case when b.status_code = 'I' then 'T' else 'F' end as invoice_flag,
+--		b.invoice_code,
+--		b.invoice_date,
+--		MONTH(b.invoice_date),
+--		YEAR(b.invoice_date),
+--		c.customer_id,
+--		c.cust_name,
+--		b.line_id,
+--		b.price_id,
+--		b.ref_line_id,
+--		b.workorder_sequence_id,
+--		b.workorder_resource_item,
+--		b.workorder_resource_type,
+--		b.quantity,
+--		bd.billing_type,
+--		case when bd.dist_company_id <> b.company_id or bd.dist_profit_ctr_id <> b.profit_ctr_id then 'D' else 'N' end,
+--		bd.dist_company_id,
+--		bd.dist_profit_ctr_id,
+--		bd.gl_account_code,
+--		bd.extended_amt,
+--		g.generator_id,
+--		g.generator_name,
+--		g.epa_id,
+--		b.bill_unit_code,
+--		b.waste_code,
+--		b.profile_id,
+--		pqa.quote_id,
+--		od.product_id,
+--		prod.product_code,
+--		b.approval_code,
+--		b.service_desc_1, 
+--		'A' as pricing_method,
+--		'T' as quantity_flag
+--	FROM Billing b (nolock)
+--	INNER JOIN #tmp_source ts
+--		ON ts.trans_source = b.trans_source
+--/*
+--	INNER JOIN #tmp_trans_copc copc
+--		ON b.company_id = copc.company_id
+--		AND b.profit_ctr_id = copc.profit_ctr_id
+--*/		
+--	INNER JOIN BillingDetail bd (nolock)
+--		ON bd.billing_uid = b.billing_uid
+--	INNER JOIN OrderHeader oh (nolock)
+--		ON b.receipt_id = oh.order_id
+--	INNER JOIN OrderDetail od (nolock)
+--		on oh.order_id = od.order_id
+--		and b.company_id = od.company_id
+--		and b.profit_ctr_id = od.profit_ctr_id
+--		and b.line_id = od.line_id
+--	INNER JOIN product prod (nolock)
+--		on od.product_id = prod.product_id
+--		and od.company_id = prod.company_id
+--		and od.profit_ctr_id = prod.profit_ctr_id
+--	INNER JOIN customer c (nolock)
+--		ON b.customer_id = c.customer_id
+--	left outer JOIN  generator g (nolock)
+--		ON b.generator_id = g.generator_id
+--	left outer JOIN CustomerBilling cb (nolock)
+--		ON b.customer_id = cb.customer_id
+--		AND ISNULL(b.billing_project_id, 0) = cb.billing_project_id
+--	LEFT OUTER JOIN profilequoteapproval pqa (nolock)
+--		ON b.profile_id = pqa.profile_id
+--		AND b.company_id = pqa.company_id
+--		AND b.profit_ctr_id = pqa.profit_ctr_id
+--	WHERE 1=1
+--		AND b.customer_id BETWEEN @cust_id_from AND @cust_id_to
+--		AND b.trans_source = 'O'
+--		AND b.status_code in (select status_code from @Billing_Status_Code)
+--		and 1 = case @invoice_flag 
+--			when 'I' then case when b.invoice_date BETWEEN @date_from AND @date_to then 1 else 0 end
+--			when 'N' then case when b.billing_date BETWEEN @date_from AND @date_to then 1 else 0 end
+--			else 0
+--		end
+--		and 1 = case @copc_search_type
+--			when 'T' then case when exists (select 1 from #tmp_trans_copc where company_id = b.company_id and profit_ctr_id = b.profit_ctr_id) then 1 else 0 end
+--			when 'D' then case when exists (select 1 from #tmp_trans_copc where company_id = bd.dist_company_id and profit_ctr_id = bd.dist_profit_ctr_id) then 1 else 0 end
+--			else 0
+--		end
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished "In Billing (Orders), Actual #FlashWork" Population' as status
+
+---- This concludes the IN BILLING email content.
+
+
+-------------------------------------------------------------------------------------
+---- NOT INVOICED RECORDS
+----END ELSE BEGIN
+-------------------------------------------------------------------------------------
+
+--/*
+--	"NOT IN BILLING" EMail content
+
+--	If not in billing
+--					If Workorder
+--								If not fixed price
+--									Select from workorder
+--										If not priced - *** You know, the query below doesn't actually specify this. Hmm.
+--											Select Project, customer, base
+
+
+--	*/
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting "Not In Billing, Workorder (NON Disposal), Not Fixed price, Not Priced" Population' as status
+
+--	-- First, the NON Disposal WO records
+
+--		INSERT #FlashWork (
+--			company_id					,
+--			profit_ctr_id				,
+--			trans_source				, -- Receipt, Workorder, Workorder-Receipt, etc
+--			receipt_id					, -- Receipt/Workorder ID
+--			trans_type					, 
+--			workorder_type				, -- WorkOrderType.account_desc
+--			trans_status				, -- Receipt or Workorder Status
+--			link_flag					,
+--			linked_record				,
+--			status_description			, -- Billing/Transaction status description
+--			trans_date					, -- Receipt Date or Workorder End Date
+--			submitted_flag				, -- Submitted Flag
+--			territory_code				, -- Billing Project Territory code
+--			billing_project_id			, -- Billing project ID
+--			billing_project_name		, -- Billing Project Name
+--			customer_id					, -- Customer ID on Receipt/Workorder
+--			cust_name					, -- Customer Name
+--			line_id						,
+--			price_id					,
+--			workorder_sequence_id		, -- Workorder sequence id
+--			workorder_resource_item		, -- Workorder Resource Item
+--			workorder_resource_type		, -- Workorder Resource Type
+--			Workorder_resource_category , -- Workorder Resource Category
+--			quantity					, -- Receipt/Workorder Quantity
+--			dist_flag,
+--			dist_company_id				, -- Distribution Company ID (which company receives the revenue)
+--			dist_profit_ctr_id			, -- Distribution Profit Ctr ID (which profitcenter receives the revenue)
+--			gl_account_code				, -- GL Account for the revenue
+--			extended_amt				, -- Revenue amt
+--			generator_id				, -- Generator ID
+--			generator_name				, -- Generator Name
+--			epa_id						, -- Generator EPA ID
+--			bill_unit_code				, -- Unit
+--			quote_id					, -- Quote ID
+--			TSDF_code					, -- TSDF Code
+--			TSDF_EQ_FLAG				, -- TSDF: Is this an EQ tsdf?
+--			fixed_price_flag			, -- Fixed Price Flag
+--			pricing_method				, -- Calculated, Actual, etc.
+--			approval_desc,
+--			quantity_flag,					-- T = has quantities, F = no quantities, so 0 used.
+--			billing_type
+--		)
+--		SELECT
+--			woh.company_id,
+--			woh.profit_ctr_id,
+--			'W' as trans_source,
+--			woh.workorder_id as receipt_id,
+--			'O' AS trans_type,
+--			woth.account_desc,
+--			woh.workorder_status AS trans_status,
+--			case when exists (
+--				select 1 from billinglinklookup (nolock)
+--				where source_id = woh.workorder_id 
+--				and source_company_id = woh.company_id
+--				and source_profit_ctr_id = woh.profit_ctr_id
+--				and link_required_flag = 'E'
+--				) then 'E' 
+--				else 
+--					case when exists (
+--						select 1 from billinglinklookup (nolock)
+--						where source_id = woh.workorder_id 
+--						and source_company_id = woh.company_id
+--						and source_profit_ctr_id = woh.profit_ctr_id
+--						and link_required_flag <> 'E'
+--					) then 'T' else 'F' 
+--					end 
+--				end AS link_flag,
+--			null as linked_record, -- Wo's don't list these.  R's do.
+--			CASE woh.workorder_status
+--				WHEN 'A' THEN 'Accepted'
+--				WHEN 'C' THEN 'Completed'
+--				WHEN 'N' THEN 'New'
+--			END as status_description,
+--			woh.end_date AS trans_date,
+--			woh.submitted_flag,
+--			CustomerBilling.territory_code,
+--			CustomerBilling.billing_project_id,
+--			CustomerBilling.project_name,
+--			Customer.customer_id,
+--			Customer.cust_name,
+--			wod.sequence_id AS line_id,
+--			1 AS price_id,
+--			wod.sequence_id,
+--			wod.resource_class_code,
+--			wod.resource_type,
+--			NULL AS Workorder_resource_category,
+--			sum(coalesce(wod.quantity_used, wod.quantity)),
+--			'N' as dist_flag,		
+--			woh.company_id, -- BillingDetail.dist_company_id,
+--			woh.profit_ctr_id, -- BillingDetail.dist_profit_ctr_id,
+--			--COALESCE(rc.gl_account_code, 
+--			--	wort.gl_seg_1 + RIGHT('00' + CONVERT(VARCHAR(2),woh.company_id), 2) 
+--			--	+ RIGHT('00' + CONVERT(VARCHAR(2),woh.profit_ctr_ID), 2) + woth.gl_seg_4),
+--			gl_account_code = dbo.fn_get_workorder_glaccount(woh.company_id, woh.profit_ctr_id, woh.workorder_id, wod.resource_type, wod.sequence_id),
+--			dbo.fn_workorder_line_price (woh.company_id, woh.profit_ctr_id, woh.workorder_id, wod.resource_type, wod.bill_unit_code, wod.sequence_id) as extended_amt,
+--			Generator.generator_id,
+--			Generator.generator_name,
+--			Generator.epa_id,
+--			wod.bill_unit_code,
+--			woh.quote_ID,
+--			TSDF.TSDF_code,
+--			TSDF.EQ_FLAG AS TSDF_EQ_FLAG,
+--			woh.fixed_price_flag,
+--			'C' AS pricing_method,
+--			tsdfa.waste_desc,
+--			CASE WHEN ISNULL(wod.quantity_used, 0) <> 0 THEN 'T' ELSE 'F' END AS quantity_flag,
+--			'WorkOrder' as billing_type
+--		FROM WorkOrderHeader woh (nolock)
+--		INNER JOIN #tmp_source ts
+--			ON 'W' = ts.trans_source
+--		INNER JOIN WorkOrderDetail wod (nolock)
+--			ON woh.workorder_id = wod.workorder_id
+--			AND woh.company_id = wod.company_id
+--			AND woh.profit_ctr_id = wod.profit_ctr_id
+--			AND wod.resource_type <> 'D'
+--			AND NOT EXISTS (
+--				SELECT 1
+--				FROM WorkorderQuoteHeader (nolock)
+--				WHERE project_code = woh.project_code
+--				AND quote_type = 'P'
+--				AND company_id = woh.company_id
+--				AND fixed_price_flag = 'T'
+--			)
+--			AND wod.bill_rate > 0
+--			AND NOT(wod.resource_type IN ('E','L','S')
+--				AND RTRIM(ISNULL(wod.group_code, '')) <> '')
+--/*				
+--		INNER JOIN #tmp_trans_copc copc
+--			ON woh.company_id = copc.company_id
+--			AND woh.profit_ctr_id = copc.profit_ctr_id
+--*/			
+--		--INNER JOIN WorkorderResourceType wort (nolock)
+--		--	ON wort.resource_type = wod.resource_type
+--		INNER JOIN WorkOrderTypeHeader woth (nolock)
+--			ON woth.workorder_type_id = woh.workorder_type_id	
+--		LEFT OUTER JOIN CustomerBilling (nolock)
+--			ON woh.customer_id = CustomerBilling.customer_id
+--			AND ISNULL(woh.billing_project_id, 0) = CustomerBilling.billing_project_id
+--		LEFT OUTER JOIN Generator (nolock)
+--			ON woh.generator_id = Generator.generator_id
+--		LEFT OUTER JOIN Customer (nolock)
+--			ON woh.customer_id = Customer.customer_id
+--		LEFT OUTER JOIN TSDF (nolock)
+--			ON wod.tsdf_code = TSDF.tsdf_code
+--		--LEFT OUTER JOIN ResourceClass rc (nolock)
+--		--	ON wod.resource_class_code = rc.resource_class_code
+--		--	AND wod.resource_type = rc.resource_type
+--		--	AND wod.company_id = rc.company_id
+--		--	AND wod.profit_ctr_id = rc.profit_ctr_id
+--		--	and wod.bill_unit_code = rc.bill_unit_code
+--		LEFT OUTER JOIN TSDFApproval tsdfa (nolock)
+--			ON wod.tsdf_approval_id = tsdfa.tsdf_approval_id
+--		WHERE 1=1
+--			AND (
+--				woh.submitted_flag = 'F' 
+--/*
+--				OR (
+--					woh.submitted_flag = 'T' 
+--					and exists (select 1 from billing where receipt_id = woh.workorder_id and company_id = woh.company_id and profit_ctr_id = woh.profit_ctr_id and trans_source = 'W' and status_code not in ('I', 'V'))
+--				)
+--*/				
+--			)
+--			AND isnull(woh.fixed_price_flag, 'F') = 'F'
+--			-- AND coalesce(wos.date_act_arrive, woh.start_date) BETWEEN @date_from AND @date_to -- ??? start_date or end_date?
+--			AND woh.start_date BETWEEN @date_from AND @date_to -- ??? start_date or end_date?
+--			AND woh.customer_id BETWEEN @cust_id_from AND @cust_id_to
+--			AND woh.workorder_status NOT IN ('V','X','T')
+--			AND (
+--				Isnull(woh.total_price,0) > 0
+--				OR
+--				EXISTS (
+--					select 1 from workorderdetail  (nolock)
+--					where workorder_id = woh.workorder_id
+--					and profit_ctr_id = woh.profit_ctr_id
+--					and company_id = woh.company_id
+--					and print_on_invoice_flag = 'T'
+--				)
+--			)
+--			AND @invoice_flag = 'N'
+--		and 1 = case when exists (select 1 from #tmp_trans_copc where company_id = woh.company_id and profit_ctr_id = woh.profit_ctr_id) then 1 else 0 end
+--	GROUP BY
+--			woh.company_id,
+--			woh.profit_ctr_id,
+--			woh.workorder_id,
+--			woth.account_desc,
+--			woh.workorder_status,
+--			CASE woh.workorder_status
+--				WHEN 'A' THEN 'Accepted'
+--				WHEN 'C' THEN 'Completed'
+--				WHEN 'N' THEN 'New'
+--			END,
+--			woh.end_date,
+--			woh.submitted_flag,
+--			CustomerBilling.territory_code,
+--			CustomerBilling.billing_project_id,
+--			CustomerBilling.project_name,
+--			Customer.customer_id,
+--			Customer.cust_name,
+--			wod.sequence_id,
+--			wod.resource_class_code,
+--			wod.bill_rate,
+--			wod.resource_type,
+--			--rc.gl_account_code, 
+--			--wort.gl_seg_1,
+--			woh.company_id, 
+--			woh.profit_ctr_ID,
+--			--woth.gl_seg_4,
+--			Generator.generator_id,
+--			Generator.generator_name,
+--			Generator.epa_id,
+--			wod.bill_unit_code,
+--			woh.quote_ID,
+--			TSDF.TSDF_code,
+--			TSDF.EQ_FLAG,
+--			woh.fixed_price_flag,
+--			tsdfa.waste_desc,
+--			CASE WHEN ISNULL(wod.quantity_used, 0) <> 0 THEN 'T' ELSE 'F' END
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished "Not In Billing, Workorder (NON Disposal), Not Fixed price, Not Priced" Population' as status
+
+--	-- Now, the Disposal WO records
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting "Not In Billing, Workorder (Disposal), Not Fixed price, Not Priced" Population' as status
+
+--		INSERT #FlashWork (
+--			company_id					,
+--			profit_ctr_id				,
+--			trans_source				, -- Receipt, Workorder, Workorder-Receipt, etc
+--			receipt_id					, -- Receipt/Workorder ID
+--			trans_type					,
+--			workorder_type				, -- WorkOrderType.account_desc
+--			trans_status				, -- Receipt or Workorder Status
+--			link_flag,
+--			linked_record,
+--			status_description			, -- Billing/Transaction status description
+--			trans_date					, -- Receipt Date or Workorder End Date
+--			submitted_flag				, -- Submitted Flag
+--			territory_code				, -- Billing Project Territory code
+--			billing_project_id			, -- Billing project ID
+--			billing_project_name		, -- Billing Project Name
+--			customer_id					, -- Customer ID on Receipt/Workorder
+--			cust_name					, -- Customer Name
+--			line_id						,
+--			price_id					,
+--			workorder_sequence_id		, -- Workorder sequence id
+--			workorder_resource_item		, -- Workorder Resource Item
+--			workorder_resource_type		, -- Workorder Resource Type
+--			Workorder_resource_category , -- Workorder Resource Category
+--			quantity					, -- Receipt/Workorder Quantity
+--			dist_flag,
+--			dist_company_id				, -- Distribution Company ID (which company receives the revenue)
+--			dist_profit_ctr_id				, -- Distribution Profit Ctr ID (which profitcenter receives the revenue)
+--			gl_account_code				, -- GL Account for the revenue
+--			extended_amt				, -- Revenue amt
+--			generator_id				, -- Generator ID
+--			generator_name				, -- Generator Name
+--			epa_id						, -- Generator EPA ID
+--			bill_unit_code				, -- Unit
+--			quote_id					, -- Quote ID
+--			TSDF_code					, -- TSDF Code
+--			TSDF_EQ_FLAG				, -- TSDF: Is this an EQ tsdf?
+--			fixed_price_flag			, -- Fixed Price Flag
+--			pricing_method				, -- Calculated, Actual, etc.
+--			approval_desc,
+--			quantity_flag,					-- T = has quantities, F = no quantities, so 0 used.
+--			billing_type
+--		)
+--		SELECT
+--			woh.company_id,
+--			woh.profit_ctr_id,
+--			'W',
+--			woh.workorder_id,
+--			'O' AS trans_type,
+--			woth.account_desc,
+--			woh.workorder_status AS trans_status,
+--			case when exists (
+--				select 1 from billinglinklookup (nolock)
+--				where source_id = woh.workorder_id 
+--				and source_company_id = woh.company_id
+--				and source_profit_ctr_id = woh.profit_ctr_id
+--				and link_required_flag = 'E'
+--				) then 'E' 
+--				else 
+--					case when exists (
+--						select 1 from billinglinklookup (nolock)
+--						where source_id = woh.workorder_id 
+--						and source_company_id = woh.company_id
+--						and source_profit_ctr_id = woh.profit_ctr_id
+--						and link_required_flag <> 'E'
+--					) then 'T' else 'F' 
+--					end 
+--				end AS link_flag,
+--			null as linked_record, -- Wo's don't list these.  R's do.
+--			CASE woh.workorder_status
+--				WHEN 'A' THEN 'Accepted'
+--				WHEN 'C' THEN 'Completed'
+--				WHEN 'N' THEN 'New'
+--			END as status_description,
+--			woh.end_date AS trans_date,
+--			woh.submitted_flag,
+--			CustomerBilling.territory_code,
+--			CustomerBilling.billing_project_id,
+--			CustomerBilling.project_name,
+--			Customer.customer_id,
+--			Customer.cust_name,
+--			wod.sequence_id AS line_id,
+			
+--			--1 AS price_id,
+--			price_id = ROW_NUMBER() 
+--				OVER(PARTITION BY woh.company_id,
+--					woh.profit_ctr_id,
+--					woh.workorder_id,
+--					wod.resource_type,
+--					wod.billing_sequence_id
+--				ORDER BY woh.company_id,
+--					woh.profit_ctr_id,
+--					woh.workorder_id,
+--					wod.resource_type,
+--					wod.billing_sequence_id),
+					
+--			wod.sequence_id,
+--			wod.resource_class_code,
+--			wod.resource_type,
+--			NULL AS Workorder_resource_category,
+--			wodu.quantity,
+--			'N' as dist_flag,		
+--			woh.company_id, -- BillingDetail.dist_company_id,
+--			woh.profit_ctr_id, -- BillingDetail.dist_profit_ctr_id,
+--			--COALESCE(rc.gl_account_code, 
+--			--	wort.gl_seg_1 + RIGHT('00' + CONVERT(VARCHAR(2),woh.company_id), 2) 
+--			--	+ RIGHT('00' + CONVERT(VARCHAR(2),woh.profit_ctr_ID), 2) + woth.gl_seg_4),
+--			gl_account_code = dbo.fn_get_workorder_glaccount(woh.company_id, woh.profit_ctr_id, woh.workorder_id, wod.resource_type, wod.sequence_id),
+--			SUM(dbo.fn_workorder_line_price (woh.company_id, woh.profit_ctr_id, woh.workorder_id, wod.resource_type, wod.bill_unit_code, wod.sequence_id)) as extended_amt,
+--			Generator.generator_id,
+--			Generator.generator_name,
+--			Generator.epa_id,
+--			wodu.bill_unit_code,
+--			woh.quote_ID,
+--			TSDF.TSDF_code,
+--			TSDF.EQ_FLAG AS TSDF_EQ_FLAG,
+--			woh.fixed_price_flag,
+--			'C' AS pricing_method,
+--			tsdfa.waste_desc,
+--			CASE WHEN ISNULL(wodu.quantity, 0) <> 0 THEN 'T' ELSE 'F' END AS quantity_flag,
+--			'WorkOrder' as billing_type	
+--		FROM WorkOrderHeader woh (nolock)
+--		INNER JOIN #tmp_source ts
+--			ON 'W' = ts.trans_source
+--		INNER JOIN WorkOrderDetail wod (nolock)
+--			ON woh.workorder_id = wod.workorder_id
+--			AND woh.company_id = wod.company_id
+--			AND woh.profit_ctr_id = wod.profit_ctr_id
+--			AND wod.resource_type = 'D'
+--			AND NOT EXISTS (
+--				SELECT 1
+--				FROM WorkorderQuoteHeader (nolock)
+--				WHERE project_code = woh.project_code
+--				AND quote_type = 'P'
+--				AND company_id = woh.company_id
+--				AND fixed_price_flag = 'T'
+--			)
+--			AND wod.bill_rate > 0
+--/*
+--		INNER JOIN #tmp_trans_copc copc
+--			ON woh.company_id = copc.company_id
+--			AND woh.profit_ctr_id = copc.profit_ctr_id
+--*/			
+--		INNER JOIN WorkOrderDetailUnit wodu (nolock)
+--			ON wod.workorder_id = wodu.workorder_id
+--			AND wod.company_id = wodu.company_id
+--			AND wod.profit_ctr_id = wodu.profit_ctr_id
+--			AND wod.resource_type = 'D'
+--			and wodu.billing_flag = 'T'
+--			AND wod.sequence_id = wodu.sequence_id
+--		--inner join WorkorderResourceType wort (nolock)
+--		--	ON wort.resource_type = wod.resource_type
+--		INNER JOIN WorkOrderTypeHeader woth (nolock)
+--			ON woth.workorder_type_id = woh.workorder_type_id	
+--		LEFT OUTER JOIN CustomerBilling (nolock)
+--			ON woh.customer_id = CustomerBilling.customer_id
+--			AND ISNULL(woh.billing_project_id, 0) = CustomerBilling.billing_project_id
+--		LEFT OUTER JOIN Generator (nolock)
+--			ON woh.generator_id = Generator.generator_id
+--		LEFT OUTER JOIN Customer (nolock)
+--			ON woh.customer_id = Customer.customer_id
+--		LEFT OUTER JOIN TSDF (nolock)
+--			ON wod.tsdf_code = TSDF.tsdf_code
+--		--LEFT OUTER JOIN ResourceClass rc (nolock)
+--		--	ON wod.resource_class_code = rc.resource_class_code
+--		--	AND wod.resource_type = rc.resource_type
+--		--	AND wod.company_id = rc.company_id
+--		--	AND wod.profit_ctr_id = rc.profit_ctr_id
+--		--	and wod.bill_unit_code = rc.bill_unit_code
+--		LEFT OUTER JOIN TSDFApproval tsdfa (nolock)
+--			ON wod.tsdf_approval_id = tsdfa.tsdf_approval_id
+--		WHERE 1=1
+--			AND (woh.submitted_flag = 'F' 
+--			/* OR (woh.submitted_flag = 'T' and not exists (select 1 from billing where receipt_id = woh.workorder_id and company_id = woh.company_id and profit_ctr_id = woh.profit_ctr_id and trans_source = 'W' and status_code = 'I')) */
+--			)
+--			AND isnull(woh.fixed_price_flag, 'F') = 'F'
+--			-- AND coalesce(wos.date_act_arrive, woh.start_date) BETWEEN @date_from AND @date_to -- ??? start_date or end_date?
+--			AND woh.start_date BETWEEN @date_from AND @date_to -- ??? start_date or end_date?
+--			AND woh.customer_id BETWEEN @cust_id_from AND @cust_id_to
+--			AND woh.workorder_status NOT IN ('V','X','T')
+--			AND (
+--				Isnull(woh.total_price,0) > 0
+--				OR
+--				EXISTS (
+--					select 1 from workorderdetail  (nolock)
+--					where workorder_id = woh.workorder_id
+--					and profit_ctr_id = woh.profit_ctr_id
+--					and company_id = woh.company_id
+--					and print_on_invoice_flag = 'T'
+--				)
+--			)
+--			AND @invoice_flag = 'N'
+--		and 1 = case when exists (select 1 from #tmp_trans_copc where company_id = woh.company_id and profit_ctr_id = woh.profit_ctr_id) then 1 else 0 end
+--	GROUP BY
+--			woh.company_id,
+--			woh.profit_ctr_id,
+--			woh.workorder_id,
+--			woth.account_desc,
+--			woh.workorder_status,
+--			CASE woh.workorder_status
+--				WHEN 'A' THEN 'Accepted'
+--				WHEN 'C' THEN 'Completed'
+--				WHEN 'N' THEN 'New'
+--			END,
+--			woh.end_date,
+--			woh.submitted_flag,
+--			CustomerBilling.territory_code,
+--			CustomerBilling.billing_project_id,
+--			CustomerBilling.project_name,
+--			Customer.customer_id,
+--			Customer.cust_name,
+--			wod.sequence_id,
+--			wod.resource_class_code,
+--			wod.resource_type,
+--			wodu.quantity,
+--			wod.bill_rate,
+--			--rc.gl_account_code, 
+--			--wort.gl_seg_1,
+--			woh.company_id, 
+--			woh.profit_ctr_ID,
+--			--woth.gl_seg_4,
+--			Generator.generator_id,
+--			Generator.generator_name,
+--			Generator.epa_id,
+--			wodu.bill_unit_code,
+--			woh.quote_ID,
+--			TSDF.TSDF_code,
+--			TSDF.EQ_FLAG,
+--			woh.fixed_price_flag,
+--			tsdfa.waste_desc,
+--			CASE WHEN ISNULL(wodu.quantity, 0) <> 0 THEN 'T' ELSE 'F' END,
+--			wod.billing_sequence_id
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished "Not In Billing, Workorder (Disposal), Not Fixed price, Not Priced" Population' as status
+
+--	/*
+
+--	If not in billing
+--					If Workorder
+--								If fixed price JUST USE PRICE ON HEADER
+
+--	*/
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting "Not In Billing, Workorder, Fixed price" Population' as status
+
+--		INSERT #FlashWork (
+--			company_id					,
+--			profit_ctr_id				,
+--			trans_source				, -- Receipt, Workorder, Workorder-Receipt, etc
+--			receipt_id					, -- Receipt/Workorder ID
+--			trans_type					,
+--			workorder_type				, -- WorkOrderType.account_desc
+--			trans_status				, -- Receipt or Workorder Status
+--			link_flag,
+--			linked_record,
+--			status_description			, -- Billing/Transaction status description
+--			trans_date					, -- Receipt Date or Workorder End Date
+--			submitted_flag				, -- Submitted Flag
+--			territory_code				, -- Billing Project Territory code
+--			billing_project_id			, -- Billing project ID
+--			billing_project_name		, -- Billing Project Name
+--			customer_id					, -- Customer ID on Receipt/Workorder
+--			cust_name					, -- Customer Name
+--			line_id						,
+--			price_id					,
+--			workorder_sequence_id		, -- Workorder sequence id
+--			-- workorder_resource_item		, -- Workorder Resource Item
+--			workorder_resource_type		, -- Workorder Resource Type
+--			Workorder_resource_category , -- Workorder Resource Category
+--			quantity					, -- Receipt/Workorder Quantity
+--			dist_flag,
+--			dist_company_id				, -- Distribution Company ID (which company receives the revenue)
+--			dist_profit_ctr_id				, -- Distribution Profit Ctr ID (which profitcenter receives the revenue)
+--			gl_account_code				, -- GL Account for the revenue
+--			extended_amt				, -- Revenue amt
+--			generator_id				, -- Generator ID
+--			generator_name				, -- Generator Name
+--			epa_id						, -- Generator EPA ID
+--			bill_unit_code				, -- Unit
+--			quote_id					, -- Quote ID
+--			TSDF_code					, -- TSDF Code
+--			TSDF_EQ_FLAG				, -- TSDF: Is this an EQ tsdf?
+--			fixed_price_flag			, -- Fixed Price Flag
+--			pricing_method				, -- Calculated, Actual, etc.
+--			quantity_flag,					-- T = has quantities, F = no quantities, so 0 used.
+--			billing_type
+--		)
+--		SELECT
+--			woh.company_id,
+--			woh.profit_ctr_id,
+--			'W',
+--			woh.workorder_id,
+--			'O' AS trans_type,
+--			woth.account_desc,
+--			woh.workorder_status AS trans_status,
+--			case when exists (
+--				select 1 from billinglinklookup (nolock)
+--				where source_id = woh.workorder_id 
+--				and source_company_id = woh.company_id
+--				and source_profit_ctr_id = woh.profit_ctr_id
+--				and link_required_flag = 'E'
+--				) then 'E' 
+--				else 
+--					case when exists (
+--						select 1 from billinglinklookup (nolock)
+--						where source_id = woh.workorder_id 
+--						and source_company_id = woh.company_id
+--						and source_profit_ctr_id = woh.profit_ctr_id
+--						and link_required_flag <> 'E'
+--					) then 'T' else 'F' 
+--					end 
+--				end AS link_flag,
+--			null as linked_record, -- Wo's don't list these.  R's do.
+--			CASE woh.workorder_status
+--				WHEN 'A' THEN 'Accepted'
+--				WHEN 'C' THEN 'Completed'
+--				WHEN 'N' THEN 'New'
+--			END as status_description,
+--			woh.end_date AS trans_date,
+--			woh.submitted_flag,
+--			CustomerBilling.territory_code,
+--			CustomerBilling.billing_project_id,
+--			CustomerBilling.project_name,
+--			Customer.customer_id,
+--			Customer.cust_name,
+--			1 AS line_id,
+--			1 AS price_id,
+--			1 AS workorder_sequence_id,
+--			-- wod.workorder_resource_item,
+--			NULL, --wod.resource_type,
+--			NULL AS Workorder_resource_category,
+--			NULL, --wod.quantity_used,
+--			'N' as dist_flag,
+--			woh.company_id, -- BillingDetail.dist_company_id,
+--			woh.profit_ctr_id, -- BillingDetail.dist_profit_ctr_id,
+--			--gl.account_code, --varchar(12)
+--			--wort.gl_seg_1 + RIGHT('00' + CONVERT(VARCHAR(2),woh.company_id),2 ) + RIGHT('00' + CONVERT(VARCHAR(2),woh.profit_ctr_ID), 2) + woth.gl_seg_4,
+--			gl_account_code = dbo.fn_get_workorder_glaccount(woh.company_id, woh.profit_ctr_id, woh.workorder_id, 'O', 0),
+--			woh.total_price,
+--			Generator.generator_id,
+--			Generator.generator_name,
+--			Generator.epa_id,
+--			NULL, -- wod.bill_unit_code,
+--			woh.quote_ID,
+--			NULL, -- TSDF.TSDF_code,
+--			NULL, -- TSDF.EQ_FLAG as TSDF_EQ_FLAG,
+--			woh.fixed_price_flag,
+--			'A' AS pricing_method,
+--			NULL, -- CASE WHEN isnull(wod.quantity_used, 0) <> 0 THEN 'T' ELSE 'F' END AS quantity_flag,
+--			'WorkOrder' as billing_type	
+--		FROM WorkOrderHeader woh (nolock)
+--		INNER JOIN #tmp_source ts
+--			ON 'W' = ts.trans_source
+--/*			
+--		INNER JOIN #tmp_trans_copc copc
+--			ON woh.company_id = copc.company_id
+--			AND woh.profit_ctr_id = copc.profit_ctr_id
+--*/			
+--		INNER JOIN WorkOrderTypeHeader woth (nolock)
+--			ON woth.workorder_type_id = woh.workorder_type_id	
+--		--inner join WorkorderResourceType wort (nolock)
+--		--	ON wort.resource_type = 'O'
+--		LEFT OUTER JOIN CustomerBilling (nolock)
+--			ON woh.customer_id = CustomerBilling.customer_id
+--			AND ISNULL(woh.billing_project_id, 0) = CustomerBilling.billing_project_id
+--		LEFT OUTER JOIN Generator (nolock)
+--			ON woh.generator_id = Generator.generator_id
+--		LEFT OUTER JOIN Customer (nolock)
+--			ON woh.customer_id = Customer.customer_id
+--		WHERE 1=1
+--			AND (woh.submitted_flag = 'F' 
+--			/* OR (woh.submitted_flag = 'T' and not exists (select 1 from billing where receipt_id = woh.workorder_id and company_id = woh.company_id and profit_ctr_id = woh.profit_ctr_id and trans_source = 'W' and status_code = 'I')) */
+--			)
+--			AND isnull(woh.fixed_price_flag, 'F') = 'T'
+--			-- AND coalesce(wos.date_act_arrive, woh.start_date) BETWEEN @date_from AND @date_to -- ??? start_date or end_date?
+--			AND woh.start_date BETWEEN @date_from AND @date_to -- ??? start_date or end_date?
+--			AND woh.customer_id BETWEEN @cust_id_from AND @cust_id_to
+--			AND woh.workorder_status NOT IN ('V','X','T')
+--			AND @invoice_flag = 'N'
+--		and 1 = case when exists (select 1 from #tmp_trans_copc where company_id = woh.company_id and profit_ctr_id = woh.profit_ctr_id) then 1 else 0 end
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished "Not In Billing, Workorder, Fixed price" Population' as status
+
+----JDB - populate #Billing from FlashWork for work orders
+--	-- Populate
+--	INSERT #Billing (
+--			company_id				,
+--			profit_ctr_id			,
+--			trans_source			,
+--			receipt_id				,
+--			line_id					,
+--			price_id				,
+--			status_code				,
+--			billing_date			,
+--			customer_id				,
+--			waste_code				,
+--			bill_unit_code			,
+--			vehicle_code			,
+--			generator_id			,
+--			generator_name			,
+--			approval_code			,
+--			time_in					,
+--			time_out				,
+--			tender_type 			,
+--			tender_comment			,
+--			quantity				,
+--			price					,
+--			add_charge_amt			,
+--			orig_extended_amt		,
+--			discount_percent		,
+--			--gl_account_code		,
+--			--gl_sr_account_code	,
+--			gl_account_type			,
+--			gl_sr_account_type		,
+--			sr_type_code			,
+--			sr_price				,
+--			waste_extended_amt		,
+--			sr_extended_amt			,
+--			total_extended_amt		,
+--			cash_received			,
+--			manifest				,
+--			shipper					,
+--			hauler					,
+--			source					,
+--			truck_code				,
+--			source_desc				,
+--			gross_weight			,
+--			tare_weight				,
+--			net_weight				,
+--			cell_location			,
+--			manual_weight_flag		,
+--			manual_price_flag		,
+--			price_level				,
+--			comment					,
+--			operator				,
+--			workorder_resource_item	,
+--			workorder_invoice_break_value	,
+--			workorder_resource_type	,
+--			workorder_sequence_id	,
+--			purchase_order			,
+--			release_code			,
+--			cust_serv_auth			,
+--			taxable_mat_flag		,
+--			license					,
+--			payment_code			,
+--			bank_app_code			,
+--			number_reprints			,
+--			void_status				,
+--			void_reason				,
+--			void_date				,
+--			void_operator			,
+--			date_added				,
+--			date_modified			,
+--			added_by				,
+--			modified_by				,
+--			trans_type				,
+--			ref_line_id				,
+--			service_desc_1			,
+--			service_desc_2			,
+--			cost					,
+--			secondary_manifest		,
+--			insr_percent			,
+--			insr_extended_amt		,
+--			--gl_insr_account_code	,
+--			ensr_percent			,
+--			ensr_extended_amt		,
+--			--gl_ensr_account_code	,
+--			bundled_tran_bill_qty_flag	,
+--			bundled_tran_price		,
+--			bundled_tran_extended_amt	,
+--			--bundled_tran_gl_account_code	,
+--			product_id				,
+--			billing_project_id		,
+--			po_sequence_id			,
+--			invoice_preview_flag	,
+--			COD_sent_flag			,
+--			COR_sent_flag			,
+--			invoice_hold_flag		,
+--			profile_id				,
+--			reference_code			,
+--			tsdf_approval_id		,
+--			billing_link_id			,
+--			hold_reason				,
+--			hold_userid				,
+--			hold_date				,
+--			invoice_id				,
+--			invoice_code			,
+--			invoice_date			,
+--			date_delivered			,
+--			resource_sort			,
+--			bill_sequence			,
+--			quote_sequence_id		,
+--			count_bundled			
+--		)
+--	SELECT
+--		fw.company_id,
+--		fw.profit_ctr_id,
+--		'W' AS trans_source,
+--		fw.receipt_id,
+--		workorder_sequence_id AS line_id,
+--		1 AS price_id,
+--		fw.trans_status,
+--		WorkOrderHeader.start_date AS billing_date,
+--		fw.customer_id,
+--		fw.waste_code,
+--		fw.bill_unit_code,
+--		'' AS vehicle_code,
+--		fw.generator_id,
+--		fw.generator_name,
+--		'' AS approval_code,
+--		WorkorderHeader.start_date AS time_in,
+--		WorkorderHeader.end_date AS time_out,
+--		4 AS tender_type,
+--		'' AS tender_comment,
+--		fw.quantity,
+--		0 AS price,
+--		0 AS add_charge_amt,
+--		fw.extended_amt,
+--		0 AS discount_percent,
+--		-- fw.gl_account_code,
+--		-- '' AS gl_sr_account_code,
+--		NULL AS gl_account_type,		-- no longer used
+--		'' AS sr_type,
+--		'E' AS sr_type_code,
+--		0 AS sr_price,
+--		fw.extended_amt AS waste_extended_amt,
+--		0 AS sr_extended_amt,
+--		fw.extended_amt AS total_extended_amt,
+--		0 AS cash_received,
+--		NULL AS manifest,
+--		NULL AS shipper,
+--		'' AS hauler,
+--		'' AS source,
+--		'' AS truck_code,
+--		'' AS source_desc,
+--		0 AS gross_weight,
+--		0 AS tare_weight,
+--		0 AS net_weight,
+--		'' AS cell_location,
+--		'' AS manual_weight_flag,
+--		'' AS manual_price_flag,
+--		'' AS price_level,
+--		'' AS comment,
+--		'' AS operator,
+--		fw.workorder_resource_item,
+--		'' AS workorder_invoice_break_value,
+--		fw.workorder_resource_type,
+--		fw.workorder_sequence_id,
+--		ISNULL(REPLACE(WorkorderHeader.purchase_order,'''', ''),'') AS purchase_order,
+--		ISNULL(REPLACE(WorkorderHeader.release_code,'''', ''),'') AS release_code,
+--		'' AS cust_serv_auth,
+--		'' AS taxable_mat_flag,
+--		'' AS license,
+--		'' AS payment_code,
+--		'' AS bank_app_code,
+--		0 AS number_reprints,
+--		'F' AS void_status,
+--		'' AS void_reason,
+--		NULL AS void_date,
+--		'' AS void_operator,
+--		GETDATE() AS date_added,
+--		GETDATE() AS date_modified,
+--		'SA' AS added_by,
+--		'SA' AS modified_by,
+--		fw.trans_type,
+--		0 AS ref_line_id,
+--			approval_desc AS service_desc_1,
+--		'' AS service_desc_2,
+--		0 AS cost,
+--		NULL AS secondary_manifest,
+--		0 AS insr_percent,
+--		0 AS insr_extended_amt,
+--		0 AS ensr_percent,
+--		0 AS ensr_extended_amt,
+--		NULL AS bundled_tran_bill_qty_flag,
+--		NULL AS bundled_tran_price,
+--		NULL AS bundled_tran_extended_amt,
+--		-- NULL AS bundled_tran_gl_account_code,
+--		NULL AS product_id,
+--		ISNULL(fw.billing_project_id,0),
+--		WorkorderHeader.po_sequence_id,
+--		'F' AS invoice_preview_flag,
+--		'F' AS COD_sent_flag,
+--		'F' AS COR_sent_flag,
+--		'F' AS invoice_hold_flag,
+--		fw.profile_id,
+--		'' AS reference_code,
+--		NULL AS tsdf_approval_id,
+--		WorkorderHeader.billing_link_id,
+--		NULL AS hold_reason,
+--		NULL AS hold_userid,
+--		NULL AS hold_date,
+--		NULL,
+--		NULL,
+--		NULL,
+--		NULL AS date_delivered,
+--		0,
+--		0,
+--		NULL AS quote_sequence_id,
+--		0 AS count_bundled
+--	FROM
+--		#FlashWork fw
+--		JOIN WorkOrderHeader
+--			ON WorkOrderHeader.company_id = fw.company_id
+--			AND WorkOrderHeader.profit_ctr_id = fw.profit_ctr_id
+--			AND WorkOrderHeader.workorder_id = fw.receipt_id
+--	WHERE 1=1 
+--		AND ISNULL(WorkOrderHeader.submitted_flag, 'F') = 'F'
+--		AND NOT EXISTS (SELECT 1 FROM Billing (nolock) 
+--			WHERE fw.company_id = Billing.company_id
+--			AND fw.profit_ctr_id = Billing.profit_ctr_id
+--			AND fw.receipt_id = Billing.receipt_id
+--			AND Billing.trans_source = 'W')
+
+
+			
+--	INSERT #BillingDetail
+--	SELECT b.billing_uid,
+--		NULL AS ref_billingdetail_uid,
+--		bt.billingtype_uid,
+--		bt.billing_type,
+--		b.company_id,
+--		b.profit_ctr_id,
+--		b.receipt_id,
+--		b.line_id,
+--		b.price_id,
+--		b.trans_source,
+--		b.trans_type,
+--		NULL AS product_id,
+--		b.company_id AS dist_company_id,
+--		b.profit_ctr_id AS dist_profit_ctr_id,
+--		NULL AS sales_tax_id,
+--		NULL AS applied_percent,
+--		b.total_extended_amt AS extended_amt,
+--		CASE b.workorder_resource_type 
+--			WHEN 'H' 
+--				-- Fixed price:
+--				THEN dbo.fn_get_workorder_glaccount(b.company_id, b.profit_ctr_id, b.receipt_id, 'O', 0)
+--			ELSE 
+--				-- Not fixed price:
+--				dbo.fn_get_workorder_glaccount(b.company_id, b.profit_ctr_id, b.receipt_id, b.workorder_resource_type, b.workorder_sequence_id)
+--			END AS gl_account_code,
+--		NULL AS sequence_id
+--		, NULL AS JDE_BU
+--		, NULL AS JDE_object
+--	FROM #Billing b
+--	JOIN BillingType bt ON bt.billing_type = 'WorkOrder'
+				
+				
+--	/*
+--	If not in Billing
+--					If Receipt
+--								Take from receipt price
+--								... later... Addition of product records from profile that are not optional and not exempt
+--								Pricing method = 'C'
+
+--	*/
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting "Not In Billing, Receipt, Actual Pricing" Population' as status
+
+--		INSERT #FlashWork
+--		SELECT DISTINCT
+--			Receipt.company_id,
+--			Receipt.profit_ctr_id,
+--			'R' AS trans_source,
+--			Receipt.receipt_id,
+--			Receipt.trans_type,
+--			case when exists (
+--				select 1 from billinglinklookup (nolock)
+--				where receipt_id = Receipt.receipt_id 
+--				and company_id = Receipt.company_id
+--				and profit_ctr_id = Receipt.profit_ctr_id
+--				and link_required_flag = 'E'
+--				) then 'E' 
+--				else 
+--					case when exists (
+--						select 1 from billinglinklookup (nolock)
+--						where receipt_id = Receipt.receipt_id 
+--						and company_id = Receipt.company_id
+--						and profit_ctr_id = Receipt.profit_ctr_id
+--						and link_required_flag <> 'E'
+--					) then 'T' else 'F' 
+--					end 
+--				end AS link_flag,
+--			dbo.fn_get_linked_workorders(receipt.company_id, receipt.profit_ctr_id, receipt.receipt_id) as linked_record, -- Wo's don't list these.  R's do.
+--			NULL AS workorder_type,
+--			Receipt.receipt_status AS trans_status,
+--			CASE Receipt.receipt_status
+--				WHEN 'L' THEN
+--					CASE Receipt.fingerpr_status
+--						WHEN 'A' THEN 'Lab, Accepted'
+--						WHEN 'H' THEN 'Lab, Hold'
+--						WHEN 'W' THEN 'Lab, Waiting'
+--						ELSE 'Unknown Lab Status: ' + Receipt.fingerpr_status
+--					END
+--				WHEN 'A' THEN 'Accepted'
+--				WHEN 'M' THEN 'Manual'
+--				WHEN 'N' THEN 'New'
+--				WHEN 'U' THEN 
+--					CASE Receipt.waste_accepted_flag
+--						WHEN 'T' THEN 'Waste Accepted'
+--						ELSE 'Unloading'
+--					END
+--				ELSE NULL
+--			END	status_description,
+--			Receipt.receipt_date AS trans_date,
+--			Receipt.submitted_flag,
+--			NULL as billing_status_code,
+--			CustomerBilling.territory_code,
+--			CustomerBilling.billing_project_id,
+--			CustomerBilling.project_name,
+--			'F' as invoice_flag,
+--			NULL as invoice_code,
+--			NULL as invoice_date,
+--			NULL as invoice_month,
+--			NULL as invoice_year,
+--			Customer.customer_id,
+--			Customer.cust_name,
+--			Receipt.line_id,
+--			ReceiptPrice.price_id,
+--			NULL as ref_line_id,
+--			NULL AS workorder_sequence_id,
+--			NULL AS workorder_resource_item,
+--			NULL AS workorder_resource_type,
+--			NULL AS Workorder_resource_category,
+--			ReceiptPrice.bill_quantity,
+--			case Receipt.trans_type
+--				WHEN 'D' then 'Disposal'
+--				WHEN 'S' then 'Product'
+--				WHEN 'W' then 'Wash'
+--			end AS billing_type,
+--			'N', -- Not Split, since there's no billing record to split it
+--			receipt.company_id,
+--			receipt.profit_ctr_id,
+--			dbo.fn_get_receipt_glaccount(receipt.company_id, receipt.profit_ctr_id, receipt.receipt_id, receipt.line_id),
+--			null as gl_native_code,
+--			null as gl_dept_code,
+--			ReceiptPrice.total_extended_amt,
+--			Generator.generator_id,
+--			Generator.generator_name,
+--			Generator.epa_id,
+--			Receipt.treatment_id,
+--			Treatment.treatment_desc,
+--			Treatment.treatment_process_id,
+--			Treatment.treatment_process_process,
+--			Treatment.disposal_service_id,
+--			Treatment.disposal_service_desc,
+--			Treatment.wastetype_id,
+--			Treatment.wastetype_category,
+--			Treatment.wastetype_description,
+--			ReceiptPrice.bill_unit_code,
+--			Receipt.waste_code,
+--			Receipt.profile_id,
+--			pqd1.quote_id,
+--			Receipt.product_id,
+--			Receipt.product_code,
+--			Receipt.approval_code,
+--			prfl.approval_desc,
+--			NULL as tsdf_code,
+--			NULL as tsdf_eq_flag,
+--			NULL AS fixed_price_flag,
+--			'A' AS pricing_method, --CASE WHEN Billing.receipt_id is not null then 'A' ELSE null END as pricing_method,
+--			CASE WHEN ISNULL(ReceiptPrice.bill_quantity, 0) <> 0 THEN 'T' ELSE 'F' END AS quantity_flag
+--		FROM Receipt (nolock)
+--		INNER JOIN #tmp_source ts
+--			ON 'R' = ts.trans_source
+--/*			
+--		INNER JOIN #tmp_trans_copc copc
+--			ON Receipt.company_id = copc.company_id
+--			AND Receipt.profit_ctr_id = copc.profit_ctr_id
+--*/			
+--		INNER JOIN ReceiptPrice (nolock)
+--			ON Receipt.company_id = ReceiptPrice.company_id
+--			AND Receipt.profit_ctr_id = ReceiptPrice.profit_ctr_id
+--			AND Receipt.receipt_id = ReceiptPrice.receipt_id
+--			AND Receipt.line_id = ReceiptPrice.line_id
+--			AND ReceiptPrice.print_on_invoice_flag = 'T'
+--		INNER JOIN Company (nolock)
+--			ON Company.company_id = Receipt.company_id
+--		INNER JOIN ProfitCenter (nolock)
+--			ON ProfitCenter.company_ID = Receipt.company_id
+--			AND ProfitCenter.profit_ctr_ID = Receipt.profit_ctr_id
+--		LEFT OUTER JOIN CustomerBilling (nolock)
+--			ON Receipt.customer_id = CustomerBilling.customer_id
+--			AND ISNULL(Receipt.billing_project_id, 0) = CustomerBilling.billing_project_id
+--		LEFT OUTER JOIN Generator (nolock)
+--			ON Receipt.generator_id = Generator.generator_id
+--		LEFT OUTER JOIN Customer (nolock)
+--			ON Receipt.customer_id = Customer.customer_id
+--		LEFT OUTER JOIN ProfileQuoteDetail pqd1 (nolock)
+--			ON Receipt.profile_id = pqd1.profile_id
+--			AND ReceiptPrice.company_id = pqd1.company_id
+--			AND ReceiptPrice.profit_ctr_id = pqd1.profit_ctr_id
+--			AND ReceiptPrice.bill_unit_code = pqd1.bill_unit_code
+--			AND pqd1.record_type = 'D'
+--		LEFT OUTER JOIN Treatment (nolock)
+--			ON Receipt.treatment_id = Treatment.treatment_id
+--			AND Receipt.company_id = Treatment.company_id
+--			AND Receipt.profit_ctr_id = Treatment.profit_ctr_id
+--		LEFT OUTER JOIN Profile prfl (nolock)
+--			ON Receipt.profile_id = prfl.profile_id
+--		WHERE
+--			(Receipt.submitted_flag = 'F' 
+--			/* OR (Receipt.submitted_flag = 'T' and not exists (select 1 from billing where receipt_id = Receipt.receipt_id and company_id = Receipt.company_id and profit_ctr_id = Receipt.profit_ctr_id and trans_source = 'R' and status_code = 'I'))
+--			*/
+--			)
+--			AND Receipt.customer_id BETWEEN @cust_id_from AND @cust_id_to
+--			-- AND COALESCE(wos.date_act_arrive, woh.start_date, receipt.receipt_date) BETWEEN @date_from AND @date_to
+--			AND receipt.receipt_date BETWEEN @date_from AND @date_to
+--			AND Receipt.fingerpr_status IN ('W', 'H', 'A')		/* Wait, Hold, Accepted */
+--			AND Receipt.receipt_status NOT IN ('V','R','T','X')
+--			AND @invoice_flag = 'N'
+--			and 1 = case @copc_search_type
+--				when 'T' then case when exists (select 1 from #tmp_trans_copc where company_id = Receipt.company_id and profit_ctr_id = Receipt.profit_ctr_id) then 1 else 0 end
+--				when 'D' then case when Receipt.profile_id in (
+--					select sg.profile_id from ProfileQuoteDetailSplitGroup sg (nolock)
+--					INNER JOIN ProfileQuoteDetail pqd (nolock) on sg.quote_id = pqd.quote_id and sg.company_id = pqd.company_id and sg.profit_ctr_id = pqd.profit_ctr_id
+--					inner join #tmp_trans_copc cp on pqd.dist_company_id = cp.company_id and pqd.dist_profit_ctr_id = cp.profit_ctr_id
+--					 ) then 1 else 0 end
+--				else 0
+--			end
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished "Not In Billing, Receipt, Actual Pricing" Population' as status
+
+--	/*
+--	If not in Billing
+--					If Receipt
+--								Take from receipt price
+--								... now... Addition of product records from profile that are not optional and not exempt
+--								Pricing method = 'C'
+--	*/
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting "Not In Billing, Receipt, Calculated Pricing" Population' as status
+
+--		INSERT #FlashWork
+--		SELECT DISTINCT
+--			k.company_id					,
+--			k.profit_ctr_id				,
+--			k.trans_source 					, -- Receipt, Workorder, Workorder-Receipt, etc
+--			k.receipt_id					, -- Receipt/Workorder ID
+--			k.trans_type					, -- Receipt trans type (O/I)
+--			k.link_flag,
+--			k.linked_record,
+--			k.workorder_type				, -- WorkOrderType.account_desc
+--			k.trans_status				, -- Receipt or Workorder Status
+--			k.status_description			, -- Billing/Transaction status description
+--			k.trans_date					, -- Receipt Date or Workorder End Date
+--			k.submitted_flag				, -- Submitted Flag
+--			k.billing_status_code			, -- Billing Status Code
+--			k.territory_code				, -- Billing Project Territory code
+--			k.billing_project_id			, -- Billing project ID
+--			k.billing_project_name		, -- Billing Project Name
+--			k.invoice_flag				, -- Invoiced? Flag
+--			k.invoice_code				, -- Invoice Code (if invoiced)
+--			k.invoice_date				, -- Invoice Date (if invoiced)
+--			k.invoice_month				, -- Invoice Date month
+--			k.invoice_year				, -- Invoice Date year
+--			k.customer_id					, -- Customer ID on Receipt/Workorder
+--			k.cust_name					, -- Customer Name
+--			k.line_id						, -- Receipt line id
+--			k.price_id					, -- Receipt line price id
+--			k.ref_line_id					, -- Billing reference line_id (which line does this refer to?)
+--			k.workorder_sequence_id		, -- Workorder sequence id
+--			k.workorder_resource_item		, -- Workorder Resource Item
+--			k.workorder_resource_type		, -- Workorder Resource Type
+--			k.Workorder_resource_category , -- Workorder Resource Category
+--			k.quantity					, -- Receipt/Workorder Quantity
+--			'Product'					, -- (billing_type) 'Energy', 'Insurance', 'Salestax' etc.
+--			case when pqd2.dist_company_id <> k.company_id or pqd2.dist_profit_ctr_id <> k.profit_ctr_id then 'D' else 'N' end,
+--			ISNULL(pqd2.dist_company_id, k.company_id),
+--			ISNULL(pqd2.dist_profit_ctr_id, k.profit_ctr_id),
+--			--prod.gl_account_code				, -- GL Account for the revenue
+--			dbo.fn_get_receipt_glaccount(k.company_id, k.profit_ctr_id, k.receipt_id, k.line_id), -- GL Account for the revenue
+--			null as gl_native_code,
+--			null as gl_dept_code,
+--			pqd2.price * k.quantity, -- Revenue amt
+--			k.generator_id				, -- Generator ID
+--			k.generator_name				, -- Generator Name
+--			k.epa_id						, -- Generator EPA ID
+--			k.treatment_id				, -- Treatment ID
+--			k.treatment_desc				, -- Treatment's treatment_desc
+--			k.treatment_process_id		, -- Treatment's treatment_process_id
+--			k.treatment_process			, -- Treatment's treatment_process (desc)
+--			k.disposal_service_id			, -- Treatment's disposal_service_id
+--			k.disposal_service_desc		, -- Treatment's disposal_service_desc
+--			k.wastetype_id				, -- Treatment's wastetype_id
+--			k.wastetype_category			, -- Treatment's wastetype category
+--			k.wastetype_description		, -- Treatment's wastetype description
+--			k.bill_unit_code				, -- Unit
+--			k.waste_code					, -- Waste Code
+--			k.profile_id					, -- Profile_id
+--			k.quote_id					, -- Quote ID
+--			pqd2.product_id					, -- BillingDetail product_id, for id'ing fees, etc.
+--			pqd2.product_code,
+--			k.approval_code				, -- Approval Code
+--			k.approval_desc,
+--			k.TSDF_code					, -- TSDF Code
+--			k.TSDF_EQ_FLAG				, -- TSDF: Is this an EQ tsdf?
+--			k.fixed_price_flag			, -- Fixed Price Flag
+--			'C', -- Calculated, Actual, etc.
+--			k.quantity_flag					-- T = has quantities, F = no quantities, so 0 used.
+--		FROM #FlashWork k
+--		INNER JOIN ProfileQuoteDetail pqd1 (nolock)
+--			ON k.profile_id = pqd1.profile_id
+--			AND k.company_id = pqd1.company_id
+--			AND k.profit_ctr_id = pqd1.profit_ctr_id
+--			AND k.bill_unit_code = pqd1.bill_unit_code
+--			AND pqd1.record_type = 'D'
+--		INNER JOIN ProfileQuoteDetail pqd2 (nolock)
+--			ON pqd2.quote_id = pqd1.quote_id
+--			AND pqd2.company_id = pqd1.company_id
+--			AND pqd2.profit_ctr_id = pqd1.profit_ctr_id
+--			AND (pqd2.ref_sequence_id = pqd1.sequence_id OR pqd2.ref_sequence_id = 0)
+--			AND pqd2.record_type IN ('S', 'T')
+--			AND pqd2.optional_flag = 'F'
+--			AND pqd2.fee_exempt_flag = 'F'
+--			AND pqd2.bill_method = 'U'
+--			AND pqd2.bill_quantity_flag = 'U'
+--		--INNER JOIN Product prod (nolock)
+--		--	ON pqd2.product_id = prod.product_id
+--		--	AND pqd2.company_id = prod.company_id
+--		--	AND pqd2.profit_ctr_id = prod.profit_ctr_id
+--		--	AND pqd2.bill_unit_code = prod.bill_unit_code
+--	WHERE k.trans_source = 'R'
+--		AND NOT EXISTS (
+--			SELECT 1 FROM Receipt r (nolock)
+--			WHERE r.receipt_id = k.receipt_id
+--			AND r.company_id = k.company_id
+--			AND r.profit_ctr_id = k.profit_ctr_id
+--			AND r.line_id = k.line_id
+--			AND (
+--				r.receipt_status = 'A' -- accepted
+--				OR (
+--					r.receipt_status = 'U'			-- waste
+--					AND r.waste_accepted_flag = 'T'		-- accepted
+				
+--				)
+--			)
+--		)
+--		AND @invoice_flag = 'N'
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished "Not In Billing, Receipt, Calculated Pricing" Population' as status
+
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting fake submit to get bundled lines, Receipt Population' as status
+--/*
+--	Perform faux Billing Submit to get other charges & splits in here.
+--	1. create @tables
+--	2. Load tables for records in #FlashWork
+--	3. Run Submit bundled charges logic (all? 1 at a time?)
+--	4. Get data back from #tables into #Flashwork
+--*/
+
+
+--	-- Populate
+--	INSERT #Billing 
+--	SELECT	receipt.company_id,
+--		receipt.profit_ctr_id,
+--		'R' AS trans_source,
+--		receipt.receipt_id,
+--		receipt.line_id,
+--		receiptPrice.price_id AS price_id,
+--		CASE WHEN receipt.billing_link_id > 0
+--		  THEN 'H'
+--		  ELSE CASE WHEN NULL IS NOT NULL THEN NULL
+--			ELSE CASE WHEN ISNULL(receipt.submit_on_hold_flag,'F') = 'T' THEN 'H' ELSE 'S' END 
+--			END 
+--		END AS status_code,
+--		receipt.receipt_date AS billing_date,
+--		ISNULL(receipt.customer_id, 0) AS customer_id,
+--		ISNULL(REPLACE(receipt.waste_code,'''', ''), '') AS waste_code,
+--		ISNULL(receiptPrice.bill_unit_code,'') AS bill_unit_code,
+--		NULL AS vehicle_code,
+--		receipt.generator_id,
+--		ISNULL(REPLACE(Generator.generator_name,'''', ''),'') AS generator_name,
+--		ISNULL(REPLACE(receipt.approval_code,'''', ''),'') AS approval_code,
+--		ISNULL(receipt.time_in, receipt.receipt_date) AS time_in,
+--		ISNULL(receipt.time_out, receipt.receipt_date) AS time_out,
+--		ISNULL(receipt.tender_type,'') AS tender_type,
+--		'' AS tender_comment,
+--		ISNULL(receiptPrice.bill_quantity,0) AS quantity,
+--		ISNULL(receiptPrice.price,0) AS price,
+--		0 AS add_charge_amt,
+--		ISNULL(receiptPrice.total_extended_amt,0) AS orig_extended_amt,
+--		CASE WHEN (
+--			SELECT ISNULL(discount_flag,'F') FROM profitcenter  (nolock)
+--			WHERE company_id = fw.company_id AND profit_ctr_id = fw.profit_ctr_id
+--		) = 'T' THEN ISNULL(CustomerBilling.cust_discount,0) ELSE 0 END AS discount_percent,
+--		--ISNULL(receipt.gl_account_code,'') AS gl_account_code,
+--		-- dbo.fn_get_receipt_glaccount(Receipt.company_id, Receipt.profit_ctr_id, Receipt.receipt_id, Receipt.line_id) AS gl_account_code,
+----rb	CASE WHEN receiptPrice.sr_type = 'E' THEN '' ELSE ISNULL((SELECT gl.account_code FROM glaccount gl WHERE gl.account_type = receiptPrice.sr_type AND gl.account_class = 'S' AND gl.profit_ctr_id = @profit_ctr_id),'') END AS gl_sr_account_code,
+--		--CASE WHEN receiptPrice.sr_type = 'E' THEN ''
+--		--	ELSE ISNULL((SELECT REPLACE(gl_account_code,'XXX',RIGHT(dbo.fn_get_receipt_glaccount(Receipt.company_id, Receipt.profit_ctr_id, Receipt.receipt_id, Receipt.line_id), 3))
+--		--				FROM Product (nolock)
+--		--				WHERE product_code = (CASE receiptPrice.sr_type WHEN 'H' THEN 'MITAXHAZ' WHEN 'P' THEN 'MITAXPERP' END)
+--		--				AND product_type = 'X' 
+--		--				AND status = 'A' 
+--		--				AND company_id = receipt.company_id 
+--		--				AND profit_ctr_id = receipt.profit_ctr_id),'') 
+--		--	END AS gl_sr_account_code,
+--		gl_account_type = ISNULL((SELECT waste_type_code FROM wastecode (nolock) WHERE waste_code = receipt.waste_code ),''),
+--		ISNULL(receiptPrice.sr_type,''),
+--		ISNULL(receiptPrice.sr_type,'') AS sr_type_code,
+--		ISNULL(receiptPrice.sr_price,0) AS sr_price,
+--		ISNULL(receiptPrice.waste_extended_amt,0) AS waste_extended_amt,
+--		ISNULL(receiptPrice.sr_extended_amt,0) AS sr_extended_amt,
+--		ISNULL(receiptPrice.total_extended_amt,0) AS total_extended_amt,
+--		ISNULL(receipt.cash_received,0) AS cash_received,
+--		ISNULL(REPLACE(receipt.manifest,'''', ''),''),
+--		CASE WHEN receipt.manifest_flag = 'M' THEN  NULL ELSE ISNULL(REPLACE(receipt.manifest,'''', ''),'') END AS shipper,
+--		ISNULL(REPLACE(receipt.hauler,'''', ''),''),
+--		'' AS source,
+--		'' AS truck_code,
+--		'' AS source_desc,
+--		ISNULL(receipt.gross_weight,0),
+--		ISNULL(receipt.tare_weight,0),
+--		ISNULL(receipt.net_weight,0),
+--		ISNULL(REPLACE(receipt.location,'''', ''),'') AS cell_location,
+--		'' AS manual_weight_flag,
+--		'' AS manual_price_flag,
+--		'' AS price_level,
+--		LEFT(ISNULL(REPLACE(receipt.manifest_comment,'''', ''),''), 60) AS comment,
+--		'' AS operator,
+--		'' AS workorder_resource_item,
+--		'' AS workorder_invoice_break_value,
+--		'' AS workorder_resource_type,
+--		'' AS workorder_sequence_id,
+--		ISNULL(REPLACE(receipt.purchase_order,'''', ''),'') AS purchase_order,
+--		ISNULL(REPLACE(receipt.release,'''', ''),'') AS release_code,
+--		'' AS cust_serv_auth,
+--		'' AS taxable_mat_flag,
+--		'' AS license,
+--		'' AS payment_code,
+--		'' AS bank_app_code,
+--		0 AS number_reprints,
+--		'F' AS void_status,
+--		'' AS void_reason,
+--		NULL AS void_date,
+--		'' AS void_operator,
+--		getdate() AS date_added,
+--		getdate() AS date_modified,
+--		'SA' AS added_by,
+--		'SA' AS modified_by,
+--		ISNULL(receipt.trans_type,''),
+--		ISNULL(receipt.ref_line_id,0),
+--		CASE WHEN receipt.trans_type = 'S' 
+--			 THEN ISNULL(REPLACE(receipt.service_desc,'''', ''),'') 
+--			 ELSE SUBSTRING(ISNULL(REPLACE(receipt.approval_code,'''', ''),'') + ' ' + ISNULL(REPLACE(Profile.approval_desc,'''', ''),''), 1, 60) 
+--			 END AS service_desc_1,
+--		'' AS service_desc_2,
+--		0 AS cost,
+--		'' AS secondary_manifest,
+		
+--		0 AS insr_percent,
+--		0 AS insr_extended_amt,
+--		--NULL AS gl_insr_account_code,
+
+--		0 AS ensr_percent,
+--		0 AS ensr_extended_amt,
+--		--NULL AS gl_ensr_account_code,
+		
+--		ISNULL(receiptPrice.bundled_tran_bill_qty_flag,0),
+--		ISNULL(receiptPrice.bundled_tran_price,0),
+--		ISNULL(receiptPrice.bundled_tran_extended_amt,0),
+--		-- ISNULL(receiptPrice.bundled_tran_gl_account_code,''),
+--		ISNULL(receipt.product_id,0),
+--		ISNULL(receipt.billing_project_id,0),
+--		ISNULL(receipt.po_sequence_id,0),
+--		'F' AS invoice_preview_flag,
+--		'F' AS COD_sent_flag,
+--		'F' AS COR_sent_flag,
+--		'F' AS invoice_hold_flag,
+--		ISNULL(receipt.profile_id,0),
+--		ISNULL(CustomerBilling.reference_code,''),
+--		CONVERT(int, NULL) AS tsdf_approval_id,
+--		receipt.billing_link_id,
+--		CASE WHEN receipt.billing_link_id IS NOT NULL AND receipt.billing_link_id = 0 AND receipt.submit_on_hold_reason IS NULL
+--			THEN NULL
+--			 WHEN receipt.billing_link_id IS NOT NULL AND receipt.billing_link_id > 0 AND receipt.submit_on_hold_reason IS NULL
+--			THEN 'receipt is member of Billing Link ' + Convert(varchar(10), receipt.billing_link_id)
+--			 WHEN ISNULL(receipt.submit_on_hold_flag,'F') = 'T' AND receipt.submit_on_hold_reason IS NULL
+--			THEN 'Submitted on Hold with no supporting reason.'
+--			 WHEN ISNULL(receipt.submit_on_hold_flag,'F') = 'T' AND receipt.submit_on_hold_reason IS NOT NULL
+--			THEN receipt.submit_on_hold_reason
+--			 WHEN NULL IS NOT NULL
+--			THEN 'Submitted on Hold with no supporting reason.'
+--		END AS hold_reason,
+--		CASE WHEN receipt.billing_link_id > 0 OR NULL IS NOT NULL OR ISNULL(receipt.submit_on_hold_flag,'F') = 'T'
+--			THEN 'SA'
+--			ELSE NULL
+--		END AS hold_userid,
+--		CASE WHEN receipt.billing_link_id > 0 OR NULL IS NOT NULL OR ISNULL(receipt.submit_on_hold_flag,'F') = 'T'
+--			THEN getdate()
+--			ELSE NULL
+--		END AS hold_date,
+--		NULL,
+--		NULL,
+--		NULL,
+--		receipt.receipt_date AS date_delivered,
+--		0,
+--		0,
+--		receiptPrice.quote_sequence_id,
+--		(SELECT COUNT(*) FROM ProfileQuoteDetail pqd  (nolock)
+--			WHERE pqd.company_id = receipt.company_id 
+--			AND pqd.profit_ctr_id = receipt.profit_ctr_id
+--			AND pqd.profile_id = receipt.profile_id
+--			AND pqd.quote_id = receiptPrice.quote_id
+--			--AND pqd.ref_sequence_id = receiptPrice.quote_sequence_id
+--			AND (pqd.ref_sequence_id = 0 OR pqd.ref_sequence_id = receiptPrice.quote_sequence_id)
+--			AND pqd.bill_method = 'B'		--Bundled lines
+--			)
+--		AS count_bundled
+--	FROM
+--		#FlashWork fw
+--		INNER JOIN Receipt (nolock)
+--			ON fw.trans_source = 'R' and fw.invoice_flag = 'F' and fw.submitted_flag = 'F'
+--			and fw.receipt_id = Receipt.receipt_id
+--			and fw.company_id = Receipt.company_id
+--			and fw.profit_ctr_id = Receipt.profit_ctr_id
+--			and fw.line_id = Receipt.line_id
+--		JOIN ReceiptPrice (nolock) 
+--			ON receipt.company_id = receiptPrice.company_id
+--			AND receipt.profit_ctr_id = receiptPrice.profit_ctr_id
+--			AND receipt.receipt_id = receiptPrice.receipt_id
+--			AND receipt.line_id = receiptPrice.line_id
+--			and fw.price_id = receiptPrice.price_id
+--			AND ISNULL(receiptPrice.print_on_invoice_flag,'F') = 'T'
+--		JOIN Company  (nolock)
+--			ON Company.company_id = Receipt.company_id
+--		LEFT OUTER JOIN CustomerBilling  (nolock)
+--			ON receipt.customer_id = CustomerBilling.customer_id
+--			AND receipt.billing_project_id = CustomerBilling.billing_project_id
+--		LEFT OUTER JOIN Generator  (nolock)
+--			ON receipt.generator_id = Generator.generator_id
+--		LEFT OUTER JOIN Profile  (nolock)
+--			ON receipt.profile_id = Profile.profile_id
+--	WHERE 1=1 
+--		AND ISNULL(receipt.submitted_flag,'F') = 'F'
+--		AND (ISNULL(receipt.optional_flag, 'F') = 'F' 
+--			OR receipt.optional_flag = 'T' AND receipt.apply_charge_flag = 'T')
+--		AND NOT EXISTS (SELECT 1 FROM Billing (nolock) 
+--			WHERE receiptPrice.company_id = Billing.company_id
+--			AND receiptPrice.profit_ctr_id = Billing.profit_ctr_id
+--			AND receiptPrice.receipt_id = Billing.receipt_id
+--			AND receiptPrice.line_id = Billing.line_id
+--			AND receiptPrice.price_id = Billing.price_id
+--			AND Billing.trans_source = 'R')
+				
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting fake submit to get bundled lines, Receipt Population, #Billing done' as status
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting fake submit to get bundled lines, Receipt Population, #BillingDetail done' as status
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting fake submit to get bundled lines, Receipt Population, sp_billing_submit_calc_receipt_charges starting' as status
+--		EXEC sp_billing_submit_calc_receipt_charges
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting fake submit to get bundled lines, Receipt Population, sp_billing_submit_calc_receipt_charges done' as status
+
+--	--------------------------------------------------------------------------------------------------------------------
+--	-- Call out-placed surcharges code 
+--	-- (Handles insurance surcharge, energy surcharge, and sales tax for Receipts and Work Orders)
+--	--------------------------------------------------------------------------------------------------------------------
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting fake submit to get surcharge/tax lines for Receipts and Work Orders, sp_billing_submit_calc_surcharges_billingdetail starting' as status
+--	EXEC sp_billing_submit_calc_surcharges_billingdetail @debug_flag
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting fake submit to get surcharge/tax lines for Receipts and Work Orders, sp_billing_submit_calc_surcharges_billingdetail done' as status
+
+--	-------------------------------------------------------------------------------------------------------------------
+--	-- Back-populate the insr_extended_amt and ensr_extended_amt fields in Billing for backward compatibility 
+--	-- until we can remove these fields altogether, and just use BillingDetail.
+--	-------------------------------------------------------------------------------------------------------------------
+--	UPDATE #Billing 
+--		SET insr_extended_amt = (SELECT SUM(extended_amt) 
+--								FROM #BillingDetail bd 
+--								WHERE bd.billing_uid = #Billing.billing_uid 
+--								AND bd.billing_type = 'Insurance'),
+--			insr_percent = (SELECT MAX(applied_percent)
+--							FROM #BillingDetail bd 
+--							WHERE bd.billing_uid = #Billing.billing_uid 
+--							AND bd.billing_type = 'Insurance')
+
+--	UPDATE #Billing 
+--		SET ensr_extended_amt = (SELECT SUM(extended_amt) 
+--								FROM #BillingDetail bd
+--								WHERE bd.billing_uid = #Billing.billing_uid	
+--								AND bd.billing_type = 'Energy'),
+--			ensr_percent = (SELECT MAX(applied_percent)
+--							FROM #BillingDetail bd 
+--							WHERE bd.billing_uid = #Billing.billing_uid 
+--							AND bd.billing_type = 'Energy')
+	
+	
+--		-- Now have to get receipt data back into #FlashWork
+--		delete from #FlashWork from #Flashwork fw
+--		inner join #Billing b
+--			on fw.receipt_id = b.receipt_id
+--			and fw.company_id = b.company_id
+--			and fw.profit_ctr_id = b.profit_ctr_id
+--			and fw.line_id = b.line_id
+--			and fw.price_id = b.price_id
+--			AND fw.trans_source = b.trans_source
+--		where fw.trans_source = 'R'
+
+--		INSERT #FlashWork (
+--			company_id					,
+--			profit_ctr_id				,
+--			trans_source				, -- Receipt, Workorder, Workorder-Receipt, etc
+--			receipt_id					, -- Receipt/Workorder ID
+--			trans_type					, -- Receipt trans type (O/I)
+--			link_flag					,
+--			linked_record				,
+--			trans_status				, -- Receipt or Workorder Status
+--			status_description			, -- Billing/Transaction status description
+--			trans_date					, -- Receipt Date or Workorder End Date
+--			submitted_flag				, -- Submitted Flag
+--			billing_status_code			, -- Billing Status Code
+--			territory_code				, -- Billing Project Territory code
+--			billing_project_id			, -- Billing project ID
+--			billing_project_name		, -- Billing Project Name
+--			invoice_flag				, -- Invoiced? Flag
+--			invoice_code				, -- Invoice Code (if invoiced)
+--			invoice_date				, -- Invoice Date (if invoiced)
+--			invoice_month				, -- Invoice Date month
+--			invoice_year				, -- Invoice Date year
+--			customer_id					, -- Customer ID on Receipt/Workorder
+--			cust_name					, -- Customer Name
+--			line_id						, -- Receipt line id
+--			price_id					, -- Receipt line price id
+--			ref_line_id					, -- Billing reference line_id (which line does this refer to?)
+--			workorder_sequence_id		, -- Workorder sequence id
+--			workorder_resource_item		, -- Workorder Resource Item
+--			workorder_resource_type		, -- Workorder Resource Type
+--			quantity					, -- Receipt/Workorder Quantity
+--			billing_type					, -- 'Energy', 'Insurance', 'Salestax' etc.
+--			dist_flag					, -- Distributed Transaction?
+--			dist_company_id				, -- Distribution Company ID (which company receives the revenue)
+--			dist_profit_ctr_id				, -- Distribution Profit Ctr ID (which profitcenter receives the revenue)
+--			gl_account_code				, -- GL Account for the revenue
+--			extended_amt				, -- Revenue amt
+--			generator_id				, -- Generator ID
+--			generator_name				, -- Generator Name
+--			epa_id						, -- Generator EPA ID
+--			treatment_id				, -- Treatment ID
+--			treatment_desc				, -- Treatment's treatment_desc
+--			treatment_process_id		, -- Treatment's treatment_process_id
+--			treatment_process			, -- Treatment's treatment_process (desc)
+--			disposal_service_id			, -- Treatment's disposal_service_id
+--			disposal_service_desc		, -- Treatment's disposal_service_desc
+--			wastetype_id				, -- Treatment's wastetype_id
+--			wastetype_category			, -- Treatment's wastetype category
+--			wastetype_description		, -- Treatment's wastetype description
+--			bill_unit_code				, -- Unit
+--			waste_code					, -- Waste Code
+--			profile_id					, -- Profile_id
+--			quote_id					, -- Quote ID
+--			product_id					, -- BillingDetail product_id, for id'ing fees, etc.
+--			product_code				, -- Product Code
+--			approval_code				, -- Approval Code
+--			approval_desc				,
+--			pricing_method				, -- Calculated, Actual, etc.
+--			quantity_flag					-- T = has quantities, F = no quantities, so 0 used.
+--		)
+--		SELECT
+--			b.company_id,
+--			b.profit_ctr_id,
+--			b.trans_source,
+--			b.receipt_id,
+--			b.trans_type,
+--			case when exists (
+--				select 1 from billinglinklookup (nolock)
+--				where receipt_id = b.receipt_id 
+--				and company_id = b.company_id
+--				and profit_ctr_id = b.profit_ctr_id
+--				and link_required_flag = 'E'
+--				) then 'E' 
+--				else 
+--					case when exists (
+--						select 1 from billinglinklookup (nolock)
+--						where receipt_id = b.receipt_id 
+--						and company_id = b.company_id
+--						and profit_ctr_id = b.profit_ctr_id
+--						and link_required_flag <> 'E'
+--					) then 'T' else 'F' 
+--					end 
+--				end AS link_flag,
+--			dbo.fn_get_linked_workorders(b.company_id, b.profit_ctr_id, b.receipt_id) as linked_record, -- Wo's don't list these.  R's do.
+--			r.receipt_status,
+--			case when b.status_code = 'I' then 'Invoiced' 
+--			else 
+--				CASE r.receipt_status
+--					WHEN 'L' THEN
+--						CASE r.fingerpr_status
+--							WHEN 'A' THEN 'Lab, Accepted'
+--							WHEN 'H' THEN 'Lab, Hold'
+--							WHEN 'W' THEN 'Lab, Waiting'
+--							ELSE 'Unknown Lab Status: ' + r.fingerpr_status
+--						END
+--					WHEN 'A' THEN 'Accepted'
+--					WHEN 'M' THEN 'Manual'
+--					WHEN 'N' THEN 'New'
+--					WHEN 'U' THEN 
+--						CASE r.waste_accepted_flag
+--							WHEN 'T' THEN 'Waste Accepted'
+--							ELSE 'Unloading'
+--						END
+--					ELSE NULL
+--				END
+--			end as status_description,
+--			r.receipt_date,
+--			r.submitted_flag,
+--			b.status_code as billing_status_code,
+--			cb.territory_code,
+--			cb.billing_project_id,
+--			cb.project_name,
+--			case when b.status_code = 'I' then 'T' else 'F' end as invoice_flag,
+--			b.invoice_code,
+--			b.invoice_date,
+--			MONTH(b.invoice_date),
+--			YEAR(b.invoice_date),
+--			c.customer_id,
+--			c.cust_name,
+--			b.line_id,
+--			b.price_id,
+--			b.ref_line_id,
+--			b.workorder_sequence_id,
+--			b.workorder_resource_item,
+--			b.workorder_resource_type,
+--			b.quantity,
+--			bd.billing_type,
+--			case when bd.dist_company_id <> b.company_id or bd.dist_profit_ctr_id <> b.profit_ctr_id then 'D' else 'N' end,
+--			bd.dist_company_id,
+--			bd.dist_profit_ctr_id,
+--			bd.gl_account_code,
+--			bd.extended_amt,
+--			g.generator_id,
+--			g.generator_name,
+--			g.epa_id,
+--			t.treatment_id,
+--			t.treatment_desc,
+--			t.treatment_process_id,
+--			t.treatment_process_process,
+--			t.disposal_service_id,
+--			t.disposal_service_desc,
+--			t.wastetype_id,
+--			t.wastetype_category,
+--			t.wastetype_description,
+--			b.bill_unit_code,
+--			b.waste_code,
+--			b.profile_id,
+--			pqa.quote_id,
+--			r.product_id,
+--			r.product_code,
+--			b.approval_code,
+--			b.service_desc_1, 
+--			'A' as pricing_method,
+--			'T' as quantity_flag
+--		FROM #Billing b
+--		INNER JOIN #BillingDetail bd
+--			ON b.billing_uid = bd.billing_uid
+--		INNER JOIN Receipt r (nolock)
+--			ON b.receipt_id = r.receipt_id
+--			AND b.line_id = r.line_id
+--			AND b.company_id = r.company_id
+--			AND b.profit_ctr_id = r.profit_ctr_id
+--		INNER JOIN customer c (nolock)
+--			ON b.customer_id = c.customer_id
+--		LEFT OUTER JOIN CustomerBilling cb (nolock)
+--			ON b.customer_id = cb.customer_id
+--			AND ISNULL(b.billing_project_id, 0) = cb.billing_project_id
+--		LEFT OUTER JOIN generator g (nolock)
+--			ON b.generator_id = g.generator_id
+--		LEFT OUTER JOIN profilequoteapproval pqa (nolock)
+--			ON b.profile_id = pqa.profile_id
+--			AND b.company_id = pqa.company_id
+--			AND b.profit_ctr_id = pqa.profit_ctr_id
+--		LEFT OUTER JOIN Treatment t (nolock)
+--			ON r.treatment_id = t.treatment_id
+--			AND r.company_id = t.company_id
+--			AND r.profit_ctr_id = t.profit_ctr_id
+--		WHERE b.trans_source = 'R'
+			
+--	IF @debug_flag > 0 PRINT 'SELECT * FROM #FlashWork'
+--	IF @debug_flag > 0 SELECT * FROM #FlashWork
+	
+--		-- Don't think we need to delete from this table; all we need to do is add the insurance/energy surcharges back in from #Billing
+--		---- Now have to get work order data back into #FlashWork
+--		--DELETE FROM #FlashWork FROM #Flashwork fw
+--		--INNER JOIN #Billing b
+--		--	ON fw.receipt_id = b.receipt_id
+--		--	AND fw.company_id = b.company_id
+--		--	AND fw.profit_ctr_id = b.profit_ctr_id
+--		--	AND fw.line_id = b.line_id
+--		--	AND fw.trans_source = b.trans_source
+--		--WHERE fw.trans_source = 'W'
+--		--AND fw.billing_type <> 'WorkOrder'
+
+--		INSERT #FlashWork (
+--			company_id					,
+--			profit_ctr_id				,
+--			trans_source				, -- Receipt, Workorder, Workorder-Receipt, etc
+--			receipt_id					, -- Receipt/Workorder ID
+--			trans_type					, -- Receipt trans type (O/I)
+--			link_flag					,
+--			linked_record				,
+--			workorder_type				, -- WorkOrderType.account_desc
+--			trans_status				, -- Receipt or Workorder Status
+--			status_description			, -- Billing/Transaction status description
+--			trans_date					, -- Receipt Date or Workorder End Date
+--			submitted_flag				, -- Submitted Flag
+--			billing_status_code			, -- Billing Status Code
+--			territory_code				, -- Billing Project Territory code
+--			billing_project_id			, -- Billing project ID
+--			billing_project_name		, -- Billing Project Name
+--			invoice_flag				, -- Invoiced? Flag
+--			invoice_code				, -- Invoice Code (if invoiced)
+--			invoice_date				, -- Invoice Date (if invoiced)
+--			invoice_month				, -- Invoice Date month
+--			invoice_year				, -- Invoice Date year
+--			customer_id					, -- Customer ID on Receipt/Workorder
+--			cust_name					, -- Customer Name
+--			line_id						, -- Receipt line id
+--			price_id					, -- Receipt line price id
+--			ref_line_id					, -- Billing reference line_id (which line does this refer to?)
+--			workorder_sequence_id		, -- Workorder sequence id
+--			workorder_resource_item		, -- Workorder Resource Item
+--			workorder_resource_type		, -- Workorder Resource Type
+--			quantity					, -- Receipt/Workorder Quantity
+--			billing_type					, -- 'Energy', 'Insurance', 'Salestax' etc.
+--			dist_flag					, -- Distributed Transaction?
+--			dist_company_id				, -- Distribution Company ID (which company receives the revenue)
+--			dist_profit_ctr_id				, -- Distribution Profit Ctr ID (which profitcenter receives the revenue)
+--			gl_account_code				, -- GL Account for the revenue
+--			extended_amt				, -- Revenue amt
+--			generator_id				, -- Generator ID
+--			generator_name				, -- Generator Name
+--			epa_id						, -- Generator EPA ID
+--			treatment_id				, -- Treatment ID
+--			treatment_desc				, -- Treatment's treatment_desc
+--			treatment_process_id		, -- Treatment's treatment_process_id
+--			treatment_process			, -- Treatment's treatment_process (desc)
+--			disposal_service_id			, -- Treatment's disposal_service_id
+--			disposal_service_desc		, -- Treatment's disposal_service_desc
+--			wastetype_id				, -- Treatment's wastetype_id
+--			wastetype_category			, -- Treatment's wastetype category
+--			wastetype_description		, -- Treatment's wastetype description
+--			bill_unit_code				, -- Unit
+--			waste_code					, -- Waste Code
+--			profile_id					, -- Profile_id
+--			quote_id					, -- Quote ID
+--			product_id					, -- BillingDetail product_id, for id'ing fees, etc.
+--			product_code				, -- Product Code
+--			approval_code				, -- Approval Code
+--			approval_desc				,
+--			fixed_price_flag			, --	Fixed	Price	Flag
+--			pricing_method				, -- Calculated, Actual, etc.
+--			quantity_flag					-- T = has quantities, F = no quantities, so 0 used.
+--		)
+--		SELECT
+--			b.company_id,
+--			b.profit_ctr_id,
+--			b.trans_source,
+--			b.receipt_id,
+--			b.trans_type,
+--			case when exists (
+--				select 1 from billinglinklookup (nolock)
+--				where source_id = b.receipt_id 
+--				and source_company_id = b.company_id
+--				and source_profit_ctr_id = b.profit_ctr_id
+--				and link_required_flag = 'E'
+--				) then 'E' 
+--				else 
+--					case when exists (
+--						select 1 from billinglinklookup (nolock)
+--						where source_id = b.receipt_id 
+--						and source_company_id = b.company_id
+--						and source_profit_ctr_id = b.profit_ctr_id
+--						and link_required_flag <> 'E'
+--					) then 'T' else 'F' 
+--					end 
+--				end AS link_flag,
+--			NULL as linked_record, -- Wo's don't list these.  R's do.
+--			woth.account_desc,
+--			woh.workorder_status AS trans_status,
+--			CASE woh.workorder_status
+--				WHEN 'A' THEN 'Accepted'
+--				WHEN 'C' THEN 'Completed'
+--				WHEN 'N' THEN 'New'
+--			END as status_description,
+--			woh.end_date AS trans_date,
+--			woh.submitted_flag,
+--			b.status_code as billing_status_code,
+--			cb.territory_code,
+--			cb.billing_project_id,
+--			cb.project_name,
+--			case when b.status_code = 'I' then 'T' else 'F' end as invoice_flag,
+--			b.invoice_code,
+--			b.invoice_date,
+--			MONTH(b.invoice_date),
+--			YEAR(b.invoice_date),
+--			c.customer_id,
+--			c.cust_name,
+--			b.line_id,
+--			b.price_id,
+--			b.ref_line_id,
+--			b.workorder_sequence_id,
+--			b.workorder_resource_item,
+--			b.workorder_resource_type,
+--			b.quantity,
+--			bd.billing_type,
+--			case when bd.dist_company_id <> b.company_id or bd.dist_profit_ctr_id <> b.profit_ctr_id then 'D' else 'N' end,
+--			bd.dist_company_id,
+--			bd.dist_profit_ctr_id,
+--			bd.gl_account_code,
+--			bd.extended_amt,
+--			g.generator_id,
+--			g.generator_name,
+--			g.epa_id,
+--			NULL AS treatment_id,
+--			NULL AS treatment_desc,
+--			NULL AS treatment_process_id,
+--			NULL AS treatment_process_process,
+--			NULL AS disposal_service_id,
+--			NULL AS disposal_service_desc,
+--			NULL AS wastetype_id,
+--			NULL AS wastetype_category,
+--			NULL AS wastetype_description,
+--			b.bill_unit_code,
+--			b.waste_code,
+--			b.profile_id,
+--			NULL AS quote_id,
+--			bd.product_id,
+--			p.product_code,
+--			b.approval_code,
+--			b.service_desc_1, 
+--			fw.fixed_price_flag,
+--			'C' as pricing_method,
+--			fw.quantity_flag as quantity_flag
+--		FROM #Billing b (NOLOCK)
+--		INNER JOIN #BillingDetail bd (NOLOCK)
+--			ON b.billing_uid = bd.billing_uid
+--			AND bd.billing_type IN ('Insurance', 'Energy')
+--		LEFT OUTER JOIN #FlashWork fw (NOLOCK)
+--			ON fw.company_id = b.company_id
+--			AND fw.profit_ctr_id = b.profit_ctr_id
+--			AND fw.trans_source = b.trans_source
+--			AND fw.receipt_id = b.receipt_id
+--			AND fw.line_id = b.line_id
+--		INNER JOIN WorkOrderHeader woh (NOLOCK)
+--			ON woh.company_id = b.company_id
+--			AND woh.profit_ctr_id = b.profit_ctr_id
+--			AND woh.workorder_id = b.receipt_id
+--		INNER JOIN WorkOrderTypeHeader woth (NOLOCK)
+--			ON woth.workorder_type_id = woh.workorder_type_id
+--		INNER JOIN customer c (nolock)
+--			ON b.customer_id = c.customer_id
+--		LEFT OUTER JOIN CustomerBilling cb (nolock)
+--			ON b.customer_id = cb.customer_id
+--			AND ISNULL(b.billing_project_id, 0) = cb.billing_project_id
+--		LEFT OUTER JOIN generator g (nolock)
+--			ON b.generator_id = g.generator_id
+--		LEFT OUTER JOIN Product p (NOLOCK)
+--			ON p.product_id = bd.product_id
+--		WHERE b.trans_source = 'W'
+			
+--	IF @debug_flag > 0 PRINT 'SELECT * FROM #FlashWork'
+--	IF @debug_flag > 0 SELECT * FROM #FlashWork
+		
+
+
+--	/*
+--	If not in billing
+--			(Receipt/Workorder work the same way, so they're combined below)
+--			ENSR
+--				If not ENSR Exempt on this billing project
+--					Select ENSR rate for the correct data and multiply it by the billing detail total
+--					Pricing method = 'C'
+--			INSR
+--				If not INSR Exempt on this billing project
+--					Select INSR rate from company table and multiply it by the billing detail total
+--					Pricing method = 'C'
+
+--	*/
+
+---- These sections below were commented out because the sp_billing_submit_calc_surcharges_billingdetail procedure
+---- calculates these insurance and energy surcharges for both receipts and work orders now.
+--/*
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting "Not In Billing, Receipt, ENSR" Population' as status
+--	-- These only apply to WO records, since the Receipt records got done in an external SP
+
+--		INSERT #FlashWork (
+--			company_id,
+--			profit_ctr_id,
+--			trans_source,
+--			receipt_id,
+--			line_id,
+--			price_id,
+--			trans_type,
+--			link_flag,
+--			linked_record,
+--			trans_status,
+--			status_description			, -- Billing/Transaction status description
+--			trans_date,
+--			submitted_flag,
+--			territory_code,
+--			billing_project_id,
+--			billing_project_name,
+--			invoice_flag,
+--			invoice_code,
+--			invoice_date,
+--			invoice_month,
+--			invoice_year,
+--			customer_id,
+--			cust_name,
+--			billing_type,
+--			dist_flag,
+--			dist_company_id,
+--			dist_profit_ctr_id,
+--			gl_account_code,
+--			extended_amt,
+--			generator_id,
+--			generator_name,
+--			epa_id,
+--			product_id,
+--			product_code,
+--			fixed_price_flag,
+--			pricing_method
+--		)
+--		SELECT DISTINCT
+--			f.company_id					,
+--			f.profit_ctr_id				,
+--			f.trans_source				,
+--			f.receipt_id					,
+--			f.line_id,
+--			f.price_id,
+--			f.trans_type					,
+--			f.link_flag,
+--			f.linked_record,
+--			f.trans_status				,
+--			f.status_description			, -- Billing/Transaction status description
+--			f.trans_date					,
+--			f.submitted_flag				,
+--			f.territory_code				,
+--			f.billing_project_id			,
+--			f.billing_project_name		,
+--			f.invoice_flag				,
+--			f.invoice_code				,
+--			f.invoice_date				,
+--			f.invoice_month				,
+--			f.invoice_year				,
+--			f.customer_id					,
+--			f.cust_name					,
+--			'Energy', -- f.billing_type					,
+--			f.dist_flag,
+--			f.dist_company_id				,
+--			f.dist_profit_ctr_id				,
+--			left(prod.gl_account_code, 9) + right(f.gl_account_code, 3),
+--	--		prod.gl_account_code				,
+--			case f.trans_source
+--				when 'R' then dbo.fn_ensr_amt_receipt_line(f.company_id, f.profit_ctr_id, f.receipt_id, f.line_id, f.price_id)
+--				when 'W' then
+--					case when f.workorder_resource_type = 'D' then
+--						dbo.fn_ensr_amt_wo_line(f.company_id, f.profit_ctr_id, f.receipt_id, f.workorder_resource_type, f.workorder_sequence_id, f.bill_unit_code)
+--					else 
+--						0
+--					end
+--				else
+--					0
+--			end  as extended_amt,		
+--			f.generator_id,
+--			f.generator_name,
+--			f.epa_id,
+--			prod.product_id,
+--			prod.product_code,
+--			f.fixed_price_flag			,
+--			'C' AS pricing_method
+--		FROM #FlashWork f
+--		INNER JOIN Product prod (nolock)
+--			ON prod.product_type = 'X'
+--			AND prod.product_code = 'ENSR'
+--			AND prod.company_id = f.company_id
+--			AND prod.profit_ctr_id = f.profit_ctr_id
+--		LEFT OUTER JOIN CustomerBilling (nolock)
+--			ON f.customer_id = CustomerBilling.customer_id
+--			AND ISNULL(f.billing_project_id, 0) = CustomerBilling.billing_project_id
+--		WHERE	
+--			isnull(f.billing_type, '') NOT IN ('Insurance', 'Energy')
+--			AND f.invoice_flag = 'F'
+--			AND (f.submitted_flag = 'F' 
+--			/*OR (f.submitted_flag = 'T' and not exists (select 1 from billing where receipt_id = f.receipt_id and company_id = f.company_id and profit_ctr_id = f.profit_ctr_id and trans_source = f.trans_source and status_code = 'I'))*/
+--			)
+--			AND @invoice_flag = 'N'
+--			AND f.trans_source <> 'R'
+--		GROUP BY
+--			f.company_id					,
+--			f.profit_ctr_id				,
+--			f.trans_source				,
+--			f.receipt_id					,
+--			f.line_id,
+--			f.price_id,
+--			f.trans_type					,
+--			f.link_flag,
+--			f.linked_record,
+--			f.workorder_type				,
+--			f.trans_status				,
+--			f.status_description			, -- Billing/Transaction status description
+--			f.trans_date					,
+--			f.submitted_flag				,
+--			f.billing_status_code			,
+--			f.territory_code				,
+--			f.billing_project_id			,
+--			f.billing_project_name		,
+--			f.invoice_flag				,
+--			f.invoice_code				,
+--			f.invoice_date				,
+--			f.invoice_month				,
+--			f.invoice_year				,
+--			f.customer_id					,
+--			f.cust_name					,
+--			f.dist_flag,
+--			f.dist_company_id				,
+--			f.dist_profit_ctr_id				,
+--			left(prod.gl_account_code, 9) + right(f.gl_account_code, 3)				,
+--			case f.trans_source
+--				when 'R' then dbo.fn_ensr_amt_receipt_line(f.company_id, f.profit_ctr_id, f.receipt_id, f.line_id, f.price_id)
+--				when 'W' then
+--					case when f.workorder_resource_type = 'D' then
+--						dbo.fn_ensr_amt_wo_line(f.company_id, f.profit_ctr_id, f.receipt_id, f.workorder_resource_type, f.workorder_sequence_id, f.bill_unit_code)
+--					else 
+--						0
+--					end
+--				else
+--					0
+--			end,
+--			f.generator_id,
+--			f.generator_name,
+--			f.epa_id,
+--			prod.product_id,
+--			prod.product_code,
+--			f.fixed_price_flag			
+--		HAVING 			case f.trans_source
+--				when 'R' then dbo.fn_ensr_amt_receipt_line(f.company_id, f.profit_ctr_id, f.receipt_id, f.line_id, f.price_id)
+--				when 'W' then
+--					case when f.workorder_resource_type = 'D' then
+--						dbo.fn_ensr_amt_wo_line(f.company_id, f.profit_ctr_id, f.receipt_id, f.workorder_resource_type, f.workorder_sequence_id, f.bill_unit_code)
+--					else 
+--						0
+--					end
+--				else
+--					0
+--			end
+--		 > 0
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished "Not In Billing, Receipt, ENSR" Population' as status
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting "Not In Billing, Receipt, INSR" Population' as status
+--	-- These only apply to WO records, since the Receipt records got done in an external SP
+
+--		INSERT #FlashWork (
+--			company_id,
+--			profit_ctr_id,
+--			trans_source,
+--			receipt_id,
+--			line_id,
+--			price_id,
+--			trans_type,
+--			link_flag,
+--			linked_record,
+--			trans_status,
+--			status_description			, -- Billing/Transaction status description
+--			trans_date,
+--			submitted_flag,
+--			territory_code,
+--			billing_project_id,
+--			billing_project_name,
+--			invoice_flag,
+--			invoice_code,
+--			invoice_date,
+--			invoice_month,
+--			invoice_year,
+--			customer_id,
+--			cust_name,
+--			billing_type,
+--			dist_flag,
+--			dist_company_id,
+--			dist_profit_ctr_id,
+--			gl_account_code,
+--			extended_amt,
+--			generator_id,
+--			generator_name,
+--			epa_id,
+--			product_id,
+--			product_code,
+--			fixed_price_flag,
+--			pricing_method
+--		)
+--		SELECT DISTINCT
+--			f.company_id					,
+--			f.profit_ctr_id				,
+--			f.trans_source				,
+--			f.receipt_id					,
+--			f.line_id,
+--			f.price_id,
+--			f.trans_type					,
+--			f.link_flag,
+--			f.linked_record,
+--			f.trans_status				,
+--			f.status_description			, -- Billing/Transaction status description
+--			f.trans_date					,
+--			f.submitted_flag				,
+--			f.territory_code				,
+--			f.billing_project_id			,
+--			f.billing_project_name		,
+--			f.invoice_flag,
+--			f.invoice_code				,
+--			f.invoice_date				,
+--			f.invoice_month				,
+--			f.invoice_year				,
+--			f.customer_id					,
+--			f.cust_name					,
+--			'Insurance', -- f.billing_type					,
+--			f.dist_flag,
+--			f.dist_company_id				,
+--			f.dist_profit_ctr_id				,
+--			left(prod.gl_account_code, 9) + right(f.gl_account_code, 3)	,
+--			case f.trans_source
+--				when 'R' then dbo.fn_insr_amt_receipt_line(f.company_id, f.profit_ctr_id, f.receipt_id, f.line_id, f.price_id)
+--				when 'W' then
+--					case when f.fixed_price_flag = 'T' then
+--						dbo.fn_insr_amt_wo(f.receipt_id, f.company_id, f.profit_ctr_id)
+--					else
+--						case when f.workorder_resource_type = 'D' then
+--							dbo.fn_insr_amt_wo_line(f.company_id, f.profit_ctr_id, f.receipt_id, f.workorder_resource_type, f.workorder_sequence_id, f.bill_unit_code)
+--						else 
+--							0
+--						end
+--					end
+--				else
+--					0
+--			end  as extended_amt,		
+--			f.generator_id,
+--			f.generator_name,
+--			f.epa_id,
+--			prod.product_id,
+--			prod.product_code,
+--			f.fixed_price_flag			,
+--			'C' AS pricing_method
+--		FROM #FlashWork f
+--		INNER JOIN Company c (nolock)
+--			ON f.company_id = c.company_id
+--		INNER JOIN Product prod (nolock)
+--			ON prod.product_type = 'X'
+--			AND prod.product_code = 'INSR'
+--			AND prod.company_id = f.company_id
+--			AND prod.profit_ctr_id = f.profit_ctr_id
+--		LEFT OUTER JOIN CustomerBilling (nolock)
+--			ON f.customer_id = CustomerBilling.customer_id
+--			AND ISNULL(f.billing_project_id, 0) = CustomerBilling.billing_project_id
+--		WHERE	
+--			isnull(f.billing_type, '') NOT IN ('Insurance', 'Energy')
+--			AND f.invoice_flag = 'F'
+--			AND (f.submitted_flag = 'F' /* OR (f.submitted_flag = 'T' and not exists (select 1 from billing where receipt_id = f.receipt_id and company_id = f.company_id and profit_ctr_id = f.profit_ctr_id and trans_source = f.trans_source and status_code = 'I')) */ )
+--			AND @invoice_flag = 'N'
+--			AND f.trans_source <> 'R'
+--		GROUP BY
+--			f.company_id					,
+--			f.profit_ctr_id				,
+--			f.trans_source				,
+--			f.receipt_id					,
+--			f.line_id,
+--			f.price_id,
+--			f.trans_type					,
+--			f.link_flag,
+--			f.linked_record,
+--			f.workorder_type				,
+--			f.trans_status				,
+--			f.status_description			, -- Billing/Transaction status description
+--			f.trans_date					,
+--			f.submitted_flag				,
+--			f.billing_status_code			,
+--			f.territory_code				,
+--			f.billing_project_id			,
+--			f.billing_project_name		,
+--			f.invoice_flag,
+--			f.invoice_code				,
+--			f.invoice_date				,
+--			f.invoice_month				,
+--			f.invoice_year				,
+--			f.customer_id					,
+--			f.cust_name					,
+--			f.dist_flag,
+--			f.dist_company_id				,
+--			f.dist_profit_ctr_id				,
+--			left(prod.gl_account_code, 9) + right(f.gl_account_code, 3)	,
+--			case f.trans_source
+--				when 'R' then dbo.fn_insr_amt_receipt_line(f.company_id, f.profit_ctr_id, f.receipt_id, f.line_id, f.price_id)
+--				when 'W' then
+--					case when f.fixed_price_flag = 'T' then
+--						dbo.fn_insr_amt_wo(f.receipt_id, f.company_id, f.profit_ctr_id)
+--					else
+--						case when f.workorder_resource_type = 'D' then
+--							dbo.fn_insr_amt_wo_line(f.company_id, f.profit_ctr_id, f.receipt_id, f.workorder_resource_type, f.workorder_sequence_id, f.bill_unit_code)
+--						else 
+--							0
+--						end
+--					end
+--				else
+--					0
+--			end,
+-- 			f.generator_id,
+--			f.generator_name,
+--			f.epa_id,
+--			prod.product_id,
+--			prod.product_code,
+--			f.fixed_price_flag			
+--		HAVING			case f.trans_source
+--				when 'R' then dbo.fn_insr_amt_receipt_line(f.company_id, f.profit_ctr_id, f.receipt_id, f.line_id, f.price_id)
+--				when 'W' then
+--					case when f.fixed_price_flag = 'T' then
+--						dbo.fn_insr_amt_wo(f.receipt_id, f.company_id, f.profit_ctr_id)
+--					else
+--						case when f.workorder_resource_type = 'D' then
+--							dbo.fn_insr_amt_wo_line(f.company_id, f.profit_ctr_id, f.receipt_id, f.workorder_resource_type, f.workorder_sequence_id, f.bill_unit_code)
+--						else 
+--							0
+--						end
+--					end
+--				else
+--					0
+--			end > 0
+			
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished "Not In Billing, Receipt, INSR" Population' as status
+--*/
+
+--	if @debug_flag > 0 select getdate() as time_now, 'Starting "Not In Billing, Orders" Population' as status
+	
+--	-- Orders
+--	INSERT #FlashWork (
+--		company_id					,
+--		profit_ctr_id				,
+--		trans_source				, -- Receipt, Workorder, Workorder-Receipt, etc
+--		receipt_id					, -- Receipt/Workorder ID
+--		trans_type					, -- Receipt trans type (O/I)
+--		trans_status				, -- Receipt or Workorder Status
+--		status_description			, -- Billing/Transaction status description
+--		trans_date					, -- Receipt Date or Workorder End Date
+--		submitted_flag				, -- Submitted Flag
+--		billing_status_code			, -- Billing Status Code
+--		territory_code				, -- Billing Project Territory code
+--		billing_project_id			, -- Billing project ID
+--		billing_project_name		, -- Billing Project Name
+--		invoice_flag				, -- Invoiced? Flag
+--		invoice_code				, -- Invoice Code (if invoiced)
+--		invoice_date				, -- Invoice Date (if invoiced)
+--		invoice_month				, -- Invoice Date month
+--		invoice_year				, -- Invoice Date year
+--		customer_id					, -- Customer ID on Receipt/Workorder
+--		cust_name					, -- Customer Name
+--		line_id						, -- Receipt line id
+--		price_id					, -- Receipt line price id
+--		ref_line_id					, -- Billing reference line_id (which line does this refer to?)
+--		workorder_sequence_id		, -- Workorder sequence id
+--		workorder_resource_item		, -- Workorder Resource Item
+--		workorder_resource_type		, -- Workorder Resource Type
+--		quantity					, -- Receipt/Workorder Quantity
+--		billing_type					, -- 'Energy', 'Insurance', 'Salestax' etc.
+--		dist_flag					, -- Distributed Transaction?
+--		dist_company_id				, -- Distribution Company ID (which company receives the revenue)
+--		dist_profit_ctr_id				, -- Distribution Profit Ctr ID (which profitcenter receives the revenue)
+--		gl_account_code				, -- GL Account for the revenue
+--		extended_amt				, -- Revenue amt
+--		generator_id				, -- Generator ID
+--		generator_name				, -- Generator Name
+--		epa_id						, -- Generator EPA ID
+--		bill_unit_code				, -- Unit
+--		waste_code					, -- Waste Code
+--		profile_id					, -- Profile_id
+--		quote_id					, -- Quote ID
+--		product_id					, -- BillingDetail product_id, for id'ing fees, etc.
+--		product_code				, -- Product Code
+--		approval_code				, -- Approval Code
+--		approval_desc				,
+--		pricing_method				, -- Calculated, Actual, etc.
+--		quantity_flag					-- T = has quantities, F = no quantities, so 0 used.
+--	)
+--	SELECT
+--		od.company_id,
+--		od.profit_ctr_id,
+--		'O',
+--		oh.order_id,
+--		NULL,
+--		oh.status,
+--		case oh.status
+--			WHEN 'P' then 'Processed'
+--			WHEN 'V' then 'Void'
+--			WHEN 'N' then 'New'
+--		end as status_description,
+--		oh.order_date,
+--		oh.submitted_flag,
+--		NULL, -- billing_status_code,
+--		cb.territory_code,
+--		cb.billing_project_id,
+--		cb.project_name,
+--		'F' as invoice_flag,
+--		NULL as invoice_code,
+--		NULL as invoice_date,
+--		NULL, -- MONTH(b.invoice_date),
+--		NULL, -- YEAR(b.invoice_date),
+--		c.customer_id,
+--		c.cust_name,
+--		od.line_id,
+--		NULL, -- b.price_id,
+--		NULL, -- b.ref_line_id,
+--		NULL, -- b.workorder_sequence_id,
+--		NULL, -- b.workorder_resource_item,
+--		NULL, -- b.workorder_resource_type,
+--		od.quantity,
+--		'Product' as billing_type,
+--		'N' as dist_flag,
+--		od.company_id,
+--		od.profit_ctr_id,
+--		prod.gl_account_code,
+--		od.extended_amt,
+--		g.generator_id,
+--		g.generator_name,
+--		g.epa_id,
+--		NULL, -- b.bill_unit_code,
+--		NULL, -- b.waste_code,
+--		NULL, -- b.profile_id,
+--		NULL, -- pqa.quote_id,
+--		od.product_id,
+--		prod.product_code,
+--		NULL, -- b.approval_code,
+--		NULL, -- b.service_desc_1, 
+--		'A' as pricing_method,
+--		'T' as quantity_flag
+--	FROM OrderHeader oh (nolock)
+--	INNER JOIN OrderDetail od (nolock)
+--		on oh.order_id = od.order_id
+--	INNER JOIN #tmp_source ts
+--		ON 'O' = ts.trans_source
+--	INNER JOIN #tmp_trans_copc copc
+--		ON od.company_id = copc.company_id
+--		AND od.profit_ctr_id = copc.profit_ctr_id
+--	INNER JOIN product prod (nolock)
+--		on od.product_id = prod.product_id
+--		and od.company_id = prod.company_id
+--		and od.profit_ctr_id = prod.profit_ctr_id
+--	INNER JOIN customer c (nolock)
+--		ON oh.customer_id = c.customer_id
+--	left outer JOIN  generator g (nolock)
+--		ON oh.generator_id = g.generator_id
+--	left outer JOIN CustomerBilling cb (nolock)
+--		ON oh.customer_id = cb.customer_id
+--		AND ISNULL(oh.billing_project_id, 0) = cb.billing_project_id
+--	WHERE 1=1
+--		AND (
+--		oh.submitted_flag = 'F' 
+--		/* OR (oh.submitted_flag = 'T' and not exists (select 1 from billing where receipt_id = oh.order_id and company_id = od.company_id and profit_ctr_id = od.profit_ctr_id and trans_source = 'O' and status_code = 'I')) */ 
+--		)
+--		and oh.status <> 'V'
+--		AND oh.order_date BETWEEN @date_from AND @date_to -- ??? start_date or end_date?
+--		AND oh.customer_id BETWEEN @cust_id_from AND @cust_id_to
+--		AND @invoice_flag = 'N'
+		
+		
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished "Not In Billing, Orders" Population' as status
+
+
+---- END -- end of invoiced vs not-invoiced 
+
+--update #FlashWork set quantity_flag = 'F' where quantity_flag is null
+--update #FlashWork set link_flag = 'F' where link_flag is null
+--update #FlashWork 
+--	set gl_native_code = left(gl_account_code, 5), 
+--		gl_dept_code = right(gl_account_code, 3) 
+--where gl_account_code is not null
+
+--update #FlashWork set invoice_flag = 'F' where invoice_code is null
+
+---- Handle @transaction_type before @copc_search_type
+---- Oh, according to LT: Show just the split lines, not the whole receipt for a split line.
+--IF @transaction_type = 'N' BEGIN
+--	if @debug_flag > 0 select getdate() as time_now, '@transaction_type = N: Removing records with split lines.' as status
+--	-- explained: delete from #flashwork where dist & company_id don't match each other.
+--	-- What's left are only rows where dist & company DO match.
+--	DELETE FROM #FlashWork
+--	FROM #FlashWork f
+--	where not(
+--		isnull(dist_company_id, company_id) = company_id
+--		and isnull(dist_profit_ctr_id, profit_ctr_id) = profit_ctr_id
+--	)
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished @transaction_type = N: Removing records with split lines.' as status
+--END
+
+--IF @transaction_type = 'S' BEGIN
+--	if @debug_flag > 0 select getdate() as time_now, '@transaction_type = S: Removing records without split lines.' as status
+--	DELETE FROM #FlashWork
+--	FROM #FlashWork f
+--	where (
+--		isnull(dist_company_id, company_id) = company_id
+--		and isnull(dist_profit_ctr_id, profit_ctr_id) = profit_ctr_id
+--	)
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished @transaction_type = S: Removing records without split lines.' as status
+--END
+	
+
+---- if user specified to search copc's among Distribution fields, it's time to filter that.
+--IF @copc_search_type = 'D' BEGIN
+--	if @debug_flag > 0 select getdate() as time_now, '@copc_search_type = D: filtering on split facilities after populating with all facilities.' as status
+--	-- If the @copc_list input was 'ALL', well that's what we already have from above. Nothing to do here.
+--	IF LTRIM(RTRIM(ISNULL(@copc_list, ''))) <> 'ALL' BEGIN
+--		-- But if it was a specific list, we have to reset #tmp_trans_copc to handle it.
+--		Truncate table #tmp_trans_copc -- clear out the old list.
+
+--		INSERT #tmp_trans_copc -- refill it.
+--		SELECT Profitcenter.company_id, Profitcenter.profit_ctr_id, Profitcenter.base_rate_quote_id
+--		FROM ProfitCenter (nolock)
+--		INNER JOIN (
+--			SELECT
+--				RTRIM(LTRIM(SUBSTRING(ROW, 1, CHARINDEX('|',ROW) - 1))) company_id,
+--				RTRIM(LTRIM(SUBSTRING(ROW, CHARINDEX('|',ROW) + 1, LEN(ROW) - (CHARINDEX('|',ROW)-1)))) profit_ctr_id
+--			from dbo.fn_SplitXsvText(',', 0, @copc_list)
+--			WHERE ISNULL(ROW, '') <> '') selected_copc ON
+--				ProfitCenter.company_id = selected_copc.company_id
+--				AND ProfitCenter.profit_ctr_id = selected_copc.profit_ctr_id
+--		WHERE ProfitCenter.status = 'A'
+--	END
+
+--	-- Now #tmp_trans_copc is ready to use again.  Apply it to the dist_company_id and dist_profit_ctr_id fields in #FlashWork
+--/*
+--	delete from #FlashWork where not exists (
+--		select 1 from #tmp_trans_copc where company_id = #FlashWork.dist_company_id and profit_ctr_id = #FlashWork.dist_profit_ctr_id
+--	)
+--*/
+--	if @debug_flag > 0 select getdate() as time_now, 'Finished @copc_search_type = D: filtering on split facilities after populating with all facilities.' as status
+--END
+
+
+
+--GO
+--GRANT EXECUTE
+--    ON OBJECT::[dbo].[sp_rpt_flash_calc_orig] TO [EQWEB]
+--    AS [dbo];
+--GO
+--GRANT EXECUTE
+--    ON OBJECT::[dbo].[sp_rpt_flash_calc_orig] TO [COR_USER]
+--    AS [dbo];
+
+
+
+--GO
+--GRANT EXECUTE
+--    ON OBJECT::[dbo].[sp_rpt_flash_calc_orig] TO [EQAI]
+--    AS [dbo];
+

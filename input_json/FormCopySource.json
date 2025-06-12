@@ -1,0 +1,72 @@
+{
+    "FormCopySource": {
+        "primary_key_changes": {
+            "new_primary_key": "formcopysource_uid",
+            "justification": [
+                "Implementing Primary Key & Foreign Key"
+            ]
+        },
+        "column_changes": [
+            {
+                "column": "added_by",
+                "change_type": "datatype_change",
+                "from": "VARCHAR (10)",
+                "to": "VARCHAR (100)"
+            },
+            {
+                "column": "modified_by",
+                "change_type": "datatype_change",
+                "from": "VARCHAR (10)",
+                "to": "VARCHAR (100)"
+            },
+            {
+                "column": "added_by",
+                "change_type": "not_null_constraint",
+                "from": "NULL",
+                "to": "NOT NULL"
+            },
+            {
+                "column": "date_added",
+                "change_type": "not_null_constraint",
+                "from": "NULL",
+                "to": "NOT NULL"
+            },
+            {
+                "column": "modified_by",
+                "change_type": "not_null_constraint",
+                "from": "NULL",
+                "to": "NOT NULL"
+            },
+            {
+                "column": "date_modified",
+                "change_type": "not_null_constraint",
+                "from": "NULL",
+                "to": "NOT NULL"
+            },
+            {
+                "column": "added_by",
+                "change_type": "default_value",
+                "from": "NULL",
+                "to": "SYSTEM_USER"
+            },
+            {
+                "column": "date_added",
+                "change_type": "default_value",
+                "from": "NULL",
+                "to": "GETDATE()"
+            },
+            {
+                "column": "modified_by",
+                "change_type": "default_value",
+                "from": "NULL",
+                "to": "SYSTEM_USER"
+            },
+            {
+                "column": "date_modified",
+                "change_type": "default_value",
+                "from": "NULL",
+                "to": "GETDATE()"
+            }
+        ]
+    }
+}
