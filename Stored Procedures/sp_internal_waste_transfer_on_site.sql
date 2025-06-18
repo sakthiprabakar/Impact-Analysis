@@ -1,4 +1,4 @@
-﻿CREATE PROCEDURE [dbo].[sp_internal_waste_transfer_on_site]
+﻿CREATE OR ALTER PROCEDURE [dbo].[sp_internal_waste_transfer_on_site]
 	@receipt_date_from		datetime,
 	@receipt_date_to 		datetime,
     @company_id				int,
@@ -15,7 +15,8 @@ PB Object(s):	r_internal_waste_report
 				Also added a check to make sure the receipt records have at least one hazardous
 				waste code.
 				Converted the sub-selects for various fields to joins.
-07/10/2014 AM   Added EPA_form_code. Also added profile_id for 'I' Union. 
+07/10/2014 AM   Added EPA_form_code. Also added profile_id for 'I' Union.
+03/06/2025 KS	Rally DE38210 - Fixed the company_id join for 'I' Union.
 
 exec sp_internal_waste_transfer_on_site '01-01-2014','07-04-2014',3,0
 
@@ -50,12 +51,11 @@ Join ProfitCenter ON Receipt.company_id = ProfitCenter.company_ID
 Join TSDF ON Receipt.TSDF_code = TSDF.TSDF_code 
    AND TSDF.TSDF_status = 'A'
    AND TSDF.eq_flag = 'T'
-   AND ( ( TSDF.TSDF_EPA_ID = ProfitCenter.EPA_ID ) OR 
-         ( ProfitCenter.company_ID in (02,03) ) 
-       AND TSDF.TSDF_EPA_ID IN ( SELECT ProfitCenter.EPA_ID
-							        FROM ProfitCenter 
-							        WHERE ProfitCenter.company_ID in (02,03)
-					            ) 
+   AND ((TSDF.TSDF_EPA_ID = ProfitCenter.EPA_ID) 
+       OR (EXISTS (select epa_id from ProfitCenter AS p
+                                             where p.company_ID in (02,03)
+                                             AND p.EPA_ID = TSDF.TSDF_EPA_ID)
+		   AND ProfitCenter.company_ID in (02,03))					
 		)
   AND (@company_id = 0 OR TSDF.eq_company = @company_id)
   AND (@company_id = 0 OR @profit_ctr_id = -1 OR TSDF.eq_profit_ctr = @profit_ctr_id)
@@ -103,12 +103,13 @@ Join ProfitCenter ON Receipt.company_id = ProfitCenter.company_ID
    AND (@company_id = 0 OR ProfitCenter.company_ID = @company_id)
    AND (@company_id = 0 OR @profit_ctr_id = -1 OR ProfitCenter.profit_ctr_ID = 0)	
 Join Generator on Generator.generator_id = receipt.generator_id 
-		AND (( (Generator.EPA_ID = ProfitCenter.EPA_ID ) OR ProfitCenter.company_ID in (02,03) )
-					  AND  Generator.EPA_ID in ( select epa_id from ProfitCenter
-												 where ProfitCenter.company_ID in (2,3)
-												)
-		    ) 
-     AND Generator.generator_country = 'USA'		   			
+   AND ((Generator.EPA_ID = ProfitCenter.EPA_ID)
+	   OR  (EXISTS (select epa_id from ProfitCenter AS p
+							   where p.company_ID in (2, 3)
+							   AND Generator.EPA_ID = p.EPA_ID)
+		   AND ProfitCenter.company_ID in (02, 03))
+		)  
+   AND Generator.generator_country = 'USA'		   			
 Join TSDF ON Receipt.company_id  = TSDF.eq_company
    AND Receipt.profit_ctr_id  = TSDF.eq_profit_ctr
    AND TSDF.TSDF_status = 'A'

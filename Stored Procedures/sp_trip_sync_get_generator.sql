@@ -1,5 +1,5 @@
 ﻿
-create procedure sp_trip_sync_get_generator
+create or alter procedure [dbo].[sp_trip_sync_get_generator]
 	@trip_connect_log_id int
 as
 /***************************************************************************************
@@ -15,6 +15,7 @@ as
                  being pulled
  07/15/2013 - rb Waste Code conversion Phase II...support for new display/status columns
  06/23/2014 - rb Added convert(varchar(5),...) to manifest_waste_code_split_flag, 'null' was being truncated to 'nul'
+ 04/21/2025 - mm Rally TA537270 - Modified to align with Generator table changes.
 ****************************************************************************************/
 
 declare @s_version varchar(10),
@@ -49,9 +50,9 @@ select 'delete from Generator where generator_id = ' + convert(varchar(20),Gener
 + isnull('''' + replace(Generator.generator_address_5, '''', '''''') + '''','null') + ','
 + isnull('''' + replace(Generator.generator_phone, '''', '''''') + '''','null') + ','
 + isnull('''' + replace(Generator.generator_fax, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Generator.added_by, '''', '''''') + '''','null') + ','
++ isnull('''' + replace(LEFT(Generator.added_by, 10), '''', '''''') + '''','null') + ','
 + isnull('''' + convert(varchar(20),Generator.date_added,120) + '''','null') + ','
-+ isnull('''' + replace(Generator.modified_by, '''', '''''') + '''','null') + ','
++ isnull('''' + replace(LEFT(Generator.modified_by, 10), '''', '''''') + '''','null') + ','
 + isnull('''' + convert(varchar(20),Generator.date_modified,120) + '''','null') + ','
 + isnull(convert(varchar(20),Generator.sic_code),'null') + ','
 + isnull('''' + replace(Generator.source, '''', '''''') + '''','null') + ','
@@ -93,10 +94,8 @@ and isnull(WorkOrderHeader.field_requested_action,'') <> 'D'
 and (Generator.date_modified > isnull(TripConnectLog.last_download_date,'01/01/1900')
      or WorkOrderHeader.date_added > isnull(TripConnectLog.last_download_date,'01/01/1900') or
 	WorkOrderHeader.field_requested_action = 'R')
-
-
 GO
+
 GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_trip_sync_get_generator] TO [EQAI]
-    AS [dbo];
+    ON OBJECT::[dbo].[sp_trip_sync_get_generator] TO [EQAI];
 

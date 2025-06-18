@@ -1,12 +1,12 @@
 USE [PLT_AI]
 GO
-/****** Object:  StoredProcedure [dbo].[sp_sfdc_wod_Insert_disposal]    Script Date: 1/27/2025 8:52:10 PM ******/
+/****** Object:  StoredProcedure [dbo].[sp_sfdc_wod_Insert_disposal]    Script Date: 5/7/2025 7:19:13 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-ALTER PROCEDURE [dbo].[sp_sfdc_wod_Insert_disposal] 
+CREATE OR ALTER     PROCEDURE [dbo].[sp_sfdc_wod_Insert_disposal] 
                         @workorder_id_ret int, 
                         @newsequence_id int,                        
                         @manifest varchar(15) null,         
@@ -48,6 +48,9 @@ Rally#  DE36836, Updated price_source value for the Indirect disposal line when 
 Rally#  DE36909 Insert/update workorderdetailunit entry for the respective billunit only
 Rally#  US136682 01/08/2025 Insert Transporter record duing new manifest creation
 Rally # US138836 -- If the bill_rate is zero then Bill_rate value will be updated in workorderdetail.
+Rally # DE37646  -- Replaced tsdf_approval_id with profile_id in one of the update workorderdetail where clause.
+Rally# DE37711 -- Added @manifest in the where clause in the workorderdetail update query
+Rally# DE38851 -- Added (@manifest) in the where clause in the workorderdetail update query
 */
 
 AS
@@ -71,7 +74,7 @@ BEGIN
 
 	Select @ll_cnt_manifest=COUNT(*) FROM  WorkorderManifest with(nolock) WHERE
 																WORKORDER_ID=@workorder_id_ret
-																AND MANIFEST=TRIM(@MANIFEST)
+																AND MANIFEST=@MANIFEST
 																and company_id=@company_id
 																and profit_ctr_ID=@profit_ctr_ID        
 
@@ -170,7 +173,7 @@ BEGIN
 			modified_by=@user_code,
 			date_modified=getdate()			
 			where
-			manifest=trim(@manifest) and
+			manifest=@manifest and
 			company_id=@company_id and
 			profit_Ctr_id=@profit_Ctr_id and
 			(ISNULL(NULLIF(manifest_state, 'NA'), '') <> ISNULL(NULLIF(@manifest_state, 'NA'), '') or
@@ -231,13 +234,14 @@ BEGIN
 									and wd.company_id=wdu.company_id
 									and wd.profit_ctr_ID=wdu.profit_ctr_ID
 									and wd.sequence_id=wdu.sequence_id
-									and wdu.bill_unit_code=@old_billunitcode      
+									and wdu.bill_unit_code=@old_billunitcode   
+									and wd.manifest=@manifest
 	   
        
         End  
 
 		If @eq_flag='F' and @ll_cnt_manifest > 0
-	    Begin		
+	    Begin			
 	      Select @ll_cnt_wdunit=count(*) from WorkorderDetailunit wdu with(nolock)
 		                            INNER JOIN workorderdetail wd ON  
 									wd.TSDF_approval_id=@TSDF_approval_id
@@ -250,6 +254,7 @@ BEGIN
 									and wd.profit_ctr_ID=wdu.profit_ctr_ID
 									and wd.sequence_id=wdu.sequence_id
 									and wdu.bill_unit_code=@old_billunitcode
+									and wd.manifest=@manifest
         End  
 	   
 
@@ -329,11 +334,12 @@ BEGIN
 					and wd.profit_ctr_ID=wdu.profit_ctr_ID
 					and wd.sequence_id=wdu.sequence_id
 					and wdu.bill_unit_code=@old_billunitcode
+					and wd.manifest=@manifest
 		
 		if @bill_rate=0
 			begin
 				update workorderdetail set bill_rate = @bill_Rate
-				where company_id = @company_id and profit_Ctr_id=@profit_Ctr_id and profile_id=@profile_id and workorder_ID=@workorder_id_ret
+				where company_id = @company_id and profit_Ctr_id=@profit_Ctr_id and profile_id=@profile_id and workorder_ID=@workorder_id_ret and manifest=@manifest
 			End	
 		End
 
@@ -363,12 +369,13 @@ BEGIN
 					and wd.profit_ctr_ID=wdu.profit_ctr_ID
 					and wd.sequence_id=wdu.sequence_id
 					and wdu.bill_unit_code=@old_billunitcode
+					and wd.manifest=@manifest
 
 			
 		if @bill_rate=0
 			begin
 				update workorderdetail set bill_rate = @bill_Rate
-				where company_id = @company_id and profit_Ctr_id=@profit_Ctr_id and TSDF_approval_id=@TSDF_approval_id and workorder_ID=@workorder_id_ret
+				where company_id = @company_id and profit_Ctr_id=@profit_Ctr_id and TSDF_approval_id=@TSDF_approval_id and workorder_ID=@workorder_id_ret and manifest=@manifest
 			End	
 
 			end	
@@ -391,6 +398,7 @@ BEGIN
 									and wd.profit_ctr_ID=wdu.profit_ctr_ID
 									and wd.sequence_id=wdu.sequence_id
 									and wdu.bill_unit_code=@old_billunitcode
+									and wd.manifest=@manifest
        
         End  
 
@@ -408,6 +416,7 @@ BEGIN
 									and wd.profit_ctr_ID=wdu.profit_ctr_ID
 									and wd.sequence_id=wdu.sequence_id
 									and wdu.bill_unit_code=@old_billunitcode
+									and wd.manifest=@manifest
         End  
 	  
 		if @ll_cnt_wdunit > 0 and @as_map_disposal_line='D' and @eq_flag='T' 
@@ -429,12 +438,13 @@ BEGIN
 					and wd.profit_ctr_ID=wdu.profit_ctr_ID
 					and wd.sequence_id=wdu.sequence_id
 					and wdu.bill_unit_code=@old_billunitcode
+					and wd.manifest=@manifest
 
 						
 		if @bill_rate=0
 			begin
 				update workorderdetail set bill_rate = @bill_Rate
-				where company_id = @company_id and profit_Ctr_id=@profit_Ctr_id and profile_id=@profile_id and workorder_ID=@workorder_id_ret
+				where company_id = @company_id and profit_Ctr_id=@profit_Ctr_id and profile_id=@profile_id and workorder_ID=@workorder_id_ret and manifest=@manifest
 			End	
 		end	
 
@@ -457,13 +467,14 @@ BEGIN
 					and wd.profit_ctr_ID=wdu.profit_ctr_ID
 					and wd.sequence_id=wdu.sequence_id
 					and wdu.bill_unit_code=@old_billunitcode
+					and wd.manifest=@manifest
 
 		
 			
 		if @bill_rate=0
 			begin
 				update workorderdetail set bill_rate = @bill_Rate
-				where company_id = @company_id and profit_Ctr_id=@profit_Ctr_id and TSDF_approval_id=@TSDF_approval_id and workorder_ID=@workorder_id_ret
+				where company_id = @company_id and profit_Ctr_id=@profit_Ctr_id and TSDF_approval_id=@TSDF_approval_id and workorder_ID=@workorder_id_ret and manifest=@manifest
 			End	
 
 		end	
@@ -690,8 +701,7 @@ BEGIN
 End
 Return 0
 
-
-Go
+GO
 
 GRANT EXECUTE ON OBJECT::[dbo].[sp_sfdc_wod_Insert_disposal] TO EQAI  
  

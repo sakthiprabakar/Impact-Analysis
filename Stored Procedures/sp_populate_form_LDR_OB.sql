@@ -1,7 +1,4 @@
-﻿drop procedure if exists dbo.sp_populate_form_ldr_ob
-go
-
-CREATE PROCEDURE dbo.sp_populate_form_LDR_OB
+﻿CREATE OR ALTER PROCEDURE dbo.sp_populate_form_LDR_OB
 	@form_id		int,
 	@receipt_id 	int,
 	@company_id		INT,
@@ -23,6 +20,8 @@ PB Object(s):
 				receipt line that are selected (i.e., the checkbox is checked) are included on the 
 				"Waste Codes:" section of the LDR.
 11/18/2022 MPM	DevOps 42183 - Reverted the changes made under 42183.
+04/29/2025 UMESH Rally # DE38760: Outbound Receipt > LDR Form > Waste Code(s)
+				Added Left outer join with table ReceiptWasteCode at line no 452.
 
 sp_populate_form_LDR_OB 10617554, 586, 14, 9, null, 'ANITHA_M', '1,2,3'
 sp_populate_form_LDR_OB -991152, 2036218 , 21, 0, null, 'MARTHA_M', '1'
@@ -290,9 +289,14 @@ BEGIN
 			f.waste_code AS waste_code,
 			'LDR-OB' AS specifier,
 			f.waste_code_uid
-		from Receipt,
-			dbo.fn_tbl_manifest_waste_codes ('profile', @profile_id, @generator_id , @tsdf_code) f
-			where Receipt.receipt_id = @receipt_id
+		FROM Receipt
+		LEFT OUTER JOIN ReceiptWasteCode RWC 
+			ON RWC.receipt_id = Receipt.receipt_id 
+			AND RWC.company_id = Receipt.company_id
+			AND RWC.profit_ctr_id = Receipt.profit_ctr_id
+		LEFT OUTER JOIN dbo.fn_tbl_manifest_waste_codes ('profile', @profile_id, @generator_id , @tsdf_code) f
+		ON f.waste_code_uid = RWC.waste_code_uid	
+		WHERE Receipt.receipt_id = @receipt_id
 			AND Receipt.profit_ctr_id = @profit_ctr_id
 			AND Receipt.company_id = @company_id
 			--AND Receipt.manifest = @manifest
@@ -449,9 +453,14 @@ BEGIN
 			f.waste_code_uid,
 			f.waste_code AS waste_code,
 			'LDR-OB' AS specifier
-		from receipt r,
-			dbo.fn_tbl_manifest_waste_codes ('tsdfapproval', @tsdf_approval_id, @generator_id , @tsdf_code) f
-			where r.receipt_id = @receipt_id
+		FROM receipt r
+		LEFT OUTER JOIN ReceiptWasteCode RWC 
+			ON RWC.receipt_id = r.receipt_id 
+			AND RWC.company_id = r.company_id
+			AND RWC.profit_ctr_id = r.profit_ctr_id
+		LEFT OUTER JOIN dbo.fn_tbl_manifest_waste_codes ('tsdfapproval', @tsdf_approval_id, @generator_id , @tsdf_code) f  
+			ON f.waste_code_uid = RWC.waste_code_uid
+		WHERE r.receipt_id = @receipt_id
 			AND r.profit_ctr_id = @profit_ctr_id
 			AND r.company_id = @company_id
 			--AND r.manifest = @manifest

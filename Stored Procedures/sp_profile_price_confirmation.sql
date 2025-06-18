@@ -12,6 +12,7 @@ CREATE PROCEDURE sp_profile_price_confirmation (
 	, @purchase_order	varchar(40) = ''
 	, @facility_id_list	varchar(max) = ''
 ) as
+
 /* **********************************************************************************
 sp_profile_price_confirmation
 
@@ -26,6 +27,7 @@ List the prices for a profile for use on COR
 03/1/2021 AM DevOps:19106 -	Modified min_qty field logic 
 03/02/2022 Allen Campbell DevOps 37866 added IsNull to min_qty field logic
 09/26/2023 AM - DevOps:65837 - Modified profile_id from int to varchar to open price confirmation for multiple profiles from customer letters.
+03/17/2025 - Ebenezerraj S - Rally US139732 - Added  price_method,price_desc,price column from PriceAdjustment Table and applied a condition to filter records where price_code_uid is not NULL.
 
 select b.profile_id, count(distinct pqa.company_id), count(distinct pqd.bill_unit_code)
  from ContactCorProfileBucket b
@@ -61,7 +63,7 @@ from ProfileQuoteApproval
 WHERE status = 'A' AND profile_id = 74990
 
 ********************************************************************************** */
-
+BEGIN
 declare @i_profile_id  varchar(max) = isnull(@profile_id, '')   
  , @i_first_name   varchar(20) = isnull(@first_name, '')  
  , @i_last_name   varchar(20) = isnull(@last_name, '')  
@@ -136,8 +138,9 @@ LEFT OUTER JOIN ProfileQuoteDetailDesc s
     AND s.record_type = 'S'  
 	LEFT OUTER JOIN  PriceCode P
 	ON P.price_code_uid =PQA.price_code_uid
+	AND P.price_code_uid IS NOT NULL
 WHERE PQA.status = 'A'  
-  AND PQA.profile_id in ( select profile_id from @profile_ids  ) 
+AND PQA.profile_id in ( select profile_id from @profile_ids  ) 
 
 select * from (   
 SELECT  
@@ -224,7 +227,11 @@ SELECT
  pqd.profit_ctr_id,  
  PQD.record_type,  
  PQD.sequence_id,
- comments.price_code
+ comments.price_code,
+ PA.price_desc,
+ PA.price AS PriceAmount,
+ PA.price_method,
+ PA.bill_unit_code AS price_bill_unit_code
 /*  
  ,               PQA.sr_type_code as sr_type_code  
  ,    PQD.quote_id as quote_id  
@@ -286,7 +293,11 @@ ethod = 'B' and pqd_s.bill_quantity_flag = 'P'),*/
                  ON PQA.profit_ctr_id = ProfitCenter.profit_ctr_id  
                  AND PQA.company_id = ProfitCenter.company_ID  
  INNER JOIN ProfitCenter upc on upc.company_id = pqd.company_id  
-  and upc.profit_ctr_id = pqd.profit_ctr_id  
+  and upc.profit_ctr_id = pqd.profit_ctr_id 
+   LEFT OUTER JOIN PriceAdjustment PA 
+    ON PQD.quote_id = PA.quote_id 
+    AND PQD.company_id = PA.company_id 
+    AND PQD.profit_ctr_id = PA.profit_ctr_id
  LEFT OUTER JOIN Product  
                  ON Product.product_id = PQD.product_id  
  INNER JOIN Customer ON (Profile.customer_id = Customer.customer_id)  
@@ -318,7 +329,7 @@ ethod = 'B' and pqd_s.bill_quantity_flag = 'P'),*/
      )   
   
  UNION  
-SELECT  
+SELECT 
  ' header fields begin here. they are only shown once on a price confirmation ' as header_marker ,  
  right('000000' + convert(varchar(20), Customer.customer_id), 6) as customer_id,  
  'ENVIRONMENTAL MANAGER' as addressee,  
@@ -402,7 +413,11 @@ SELECT
  pqd.profit_ctr_id,  
  PQD.record_type,  
  PQD.sequence_id,
- comments.price_code
+ comments.price_code,
+ PA.price_desc,
+ PA.price AS PriceAmount,
+ PA.price_method,
+ PA.bill_unit_code AS price_bill_unit_code
 /*  
  ,               PQA.sr_type_code as sr_type_code  
  ,    PQD.quote_id as quote_id  
@@ -463,6 +478,10 @@ FROM Profile
                  AND PQA.company_id = ProfitCenter.company_ID  
  INNER JOIN ProfitCenter upc on upc.company_id = pqd.company_id  
   and upc.profit_ctr_id = pqd.profit_ctr_id  
+ LEFT OUTER JOIN  PriceAdjustment PA 
+   ON PQD.quote_id = PA.quote_id 
+   AND PQD.company_id = PA.company_id 
+    AND PQD.profit_ctr_id = PA.profit_ctr_id
  LEFT OUTER JOIN Product  
         ON Product.product_id = PQD.product_id  
  INNER JOIN Customer ON (Profile.customer_id = Customer.customer_id)  
@@ -496,6 +515,7 @@ order by profile_id, profit_ctr_name, case record_type
 when 'D' then 1 when 'T' then 2 when 'S' then 3 else 4 end  
 , sequence_id, bill_unit_code
 
+END 
 GO
 GRANT EXECUTE on sp_profile_price_confirmation to COR_USER
 GO

@@ -59,6 +59,10 @@ History:
 								 If 'Exempt EEC' checkbox on a Resource Class Name record to 'T' then
 								 the resource should be exempted from having an EEC fee applied.
 12/16/2024	SG	Rally # DE36839 - EIR populating on SF integrated invoices- IC Direct Bill
+02/21/2025	KS	Rally US142647 - Updated the logic to calculate EEC Fee based on Product.exempt_eec_fee_flag flag.
+03/20/2025	KS	Rally DE38329 - Updated the logic to charge EEC Fee on N/C lines. The EEC fee on fix price 
+								work orders should be charged only once based on the total work order price.
+05/19/2025 Nagaraj M Rally # US152029 -- calculate EEC fee, if workorder is from SalesForce as well.
 
 SELECT * FROM Billing WHERE receipt_id = 50151 AND company_id = 25
 SELECT * FROM BillingDetail WHERE billing_uid = 507300 ORDER BY line_id, ref_billingdetail_uid, billingdetail_uid
@@ -194,7 +198,7 @@ SET @billing_date = GetDate ()
 		AND bd.trans_source = 'R'
 		-- JDB 6/16/2014 - This part was added so that we do not apply insurance surcharge to bundled Product lines that are Regulated Fees.
 		AND ((bd.billing_type IN ('Disposal', 'Wash'))
-			OR (bd.billing_type = 'Product' AND ISNULL(p_product_being_billed.regulated_fee, 'F') = 'F')
+			OR (bd.billing_type = 'Product' AND (p_product_being_billed.regulated_fee = 'F' OR p_product_being_billed.regulated_fee IS NULL))
 			)
 
 		IF @debug = 1 PRINT 'SELECT * FROM ##BillingDetail_INSR (sp_billing_submit_calc_surcharges_billingdetail) Insurance Surcharge'
@@ -403,7 +407,8 @@ IF @debug = 1 SELECT * FROM #BillingDetail_ENSR
 		AND bd.billing_type IN ('Disposal', 'Product', 'Retail', 'Wash')
 		AND bd.trans_source = 'R'
 		AND ((bd.trans_type = 'D')
-			OR (bd.trans_type = 'S' and  ISNULL(p_product_being_billed.regulated_fee, 'F') = 'F'))
+			OR ((bd.trans_type = 'S' and  (p_product_being_billed.regulated_fee = 'F' OR p_product_being_billed.regulated_fee IS NULL))
+			AND (bd.trans_type = 'S' and  p_product_being_billed.exempt_eec_fee_flag = 'F')))
  
 IF @debug = 1 PRINT 'SELECT * FROM #BillingDetail_FRF (sp_billing_submit_calc_surcharges_billingdetail) Fuel Recovery Surcharge'
 IF @debug = 1 SELECT * FROM #BillingDetail_FRF
@@ -502,7 +507,7 @@ IF @debug = 1 SELECT * FROM #BillingDetail_FRF
 		AND bd.billing_type IN ('Disposal', 'Product', 'Retail', 'Wash')
 		AND bd.trans_source = 'R'
 		AND ((bd.trans_type = 'D')
-			OR (bd.trans_type = 'S' and  ISNULL(p_product_being_billed.regulated_fee, 'F') = 'F'))
+			OR (bd.trans_type = 'S' and  (p_product_being_billed.regulated_fee = 'F' OR p_product_being_billed.regulated_fee IS NULL)))
  
 IF @debug = 1 PRINT 'SELECT * FROM #BillingDetail_FRF (sp_billing_submit_calc_surcharges_billingdetail) Fuel Recovery Surcharge'
 IF @debug = 1 SELECT * FROM #BillingDetail_FRF
@@ -707,7 +712,7 @@ IF @debug = 1 SELECT * FROM #BillingDetail_FRF
 		INNER JOIN WorkorderHeader woh ON woh.company_id = b.company_id
 			AND woh.profit_ctr_id = b.profit_ctr_id
 			AND woh.workorder_id = b.receipt_id
-			AND woh.salesforce_invoice_CSID IS NULL
+			--AND woh.salesforce_invoice_CSID IS NULL
 		INNER JOIN WorkOrderManifest wom ON wom.company_id = wod.company_id
 			AND wom.profit_ctr_id = wod.profit_ctr_id
 			AND wom.workorder_id = wod.workorder_id
@@ -815,7 +820,7 @@ IF @debug = 1 SELECT * FROM #BillingDetail_FRF
 		INNER JOIN WorkOrderHeader woh ON woh.company_id = b.company_id
 			AND woh.profit_ctr_id = b.profit_ctr_id
 			AND woh.workorder_id = b.receipt_id
-			AND woh.salesforce_invoice_csid is null
+			--AND woh.salesforce_invoice_csid is null
 		INNER JOIN WorkOrderDetail wod ON wod.company_id = b.company_id
 			AND wod.profit_ctr_id = b.profit_ctr_id
 			AND wod.workorder_id = b.receipt_id
@@ -925,13 +930,13 @@ IF @debug = 1 SELECT * FROM #BillingDetail_FRF
 		INNER JOIN WorkOrderHeader woh ON woh.company_id = b.company_id
 			AND woh.profit_ctr_id = b.profit_ctr_id
 			AND woh.workorder_id = b.receipt_id
-			AND woh.salesforce_invoice_csid is null
+			--AND woh.salesforce_invoice_csid is null
 		INNER JOIN WorkOrderDetail wod ON wod.company_id = b.company_id
 			AND wod.profit_ctr_id = b.profit_ctr_id
 			AND wod.workorder_id = b.receipt_id
 			--Rally#DE35428
 			AND ( ( wod.resource_type = b.workorder_resource_type ) AND ( wod.sequence_id = b.workorder_sequence_id )   
-			      OR woh.fixed_price_flag = 'T' )
+			      OR (woh.fixed_price_flag = 'T' AND (wod.bill_rate <> 0 OR wod.bill_rate IS NULL)))
 			AND wod.resource_type in ('E', 'L', 'S', 'O', 'G')
 		JOIN ResourceClassDetail rcd
 			ON wod.company_id = rcd.company_id
@@ -943,6 +948,115 @@ IF @debug = 1 SELECT * FROM #BillingDetail_FRF
 		--	AND wom.profit_ctr_id = wod.profit_ctr_id
 		--	AND wom.workorder_id = wod.workorder_id
 		--	AND wom.manifest = wod.manifest
+		LEFT OUTER JOIN Product p_frf ON p_frf.product_code = 'FRF' 
+			AND p_frf.product_type = 'X' 
+			AND p_frf.status = 'A' 
+			AND p_frf.company_ID = bd.dist_company_id
+			AND p_frf.profit_ctr_ID = bd.dist_profit_ctr_id
+		WHERE 1=1
+		AND bd.trans_source = 'W'
+		AND bd.billing_type IN ('WorkOrder')
+
+		INSERT INTO #BillingDetail_FRF
+(
+	billing_uid			,
+	ref_billingdetail_uid,
+	billingtype_uid		,
+	billing_type		,
+	company_id			,
+	profit_ctr_id		,
+	receipt_id			,
+	line_id				,
+	price_id			,
+	trans_source		,
+	trans_type			,
+	product_id			,
+	dist_company_id		,
+	dist_profit_ctr_id	,
+	sales_tax_id		,
+	applied_percent		,
+	extended_amt		,
+	gl_account_code		,
+	sequence_id			,
+	JDE_BU				,
+	JDE_object			,
+	AX_MainAccount		,
+	AX_Dimension_1		,
+	AX_Dimension_2		,
+	AX_Dimension_3		,
+	AX_Dimension_4		,
+	AX_Dimension_5_Part_1		,
+	AX_Dimension_5_Part_2		,
+	AX_Dimension_6		,
+	AX_Project_Required_Flag ,
+	disc_amount,
+	currency_code
+)
+		SELECT DISTINCT b.billing_uid,
+			bd.billingdetail_uid AS ref_billingdetail_uid,
+			bt.billingtype_uid,
+			bt.billing_type,
+			bd.company_id,
+			bd.profit_ctr_id, 
+			bd.receipt_id,
+			bd.line_id,
+			bd.price_id,
+			bd.trans_source,
+			NULL AS trans_type,
+			p_frf.product_id, 
+			bd.dist_company_id, 
+			bd.dist_profit_ctr_id,
+			NULL AS sales_tax_id,
+			CASE WHEN dbo.fn_get_resource_exempt_eec_fee_flag(b.workorder_resource_item, b.workorder_resource_type) = 'T'
+					THEN 0
+				 ELSE ISNULL(dbo.fn_get_frf_fee_rate(b.customer_id, b.billing_project_id, b.billing_date), 0)
+			END AS applied_percent,
+			extended_amt = dbo.fn_erf_frf_amt_billingdetail_line(
+				dbo.fn_get_recovery_fee_flag('FRF', b.customer_id, b.billing_project_id, b.billing_date),
+				CASE WHEN dbo.fn_get_resource_exempt_eec_fee_flag(b.workorder_resource_item, b.workorder_resource_type) = 'T'
+						THEN 0
+					 ELSE ISNULL(dbo.fn_get_frf_fee_rate(b.customer_id, b.billing_project_id, b.billing_date), 0) END,
+				bd.extended_amt),
+			gl_account_code = LEFT(p_frf.gl_account_code, 5) 
+				+ RIGHT('00' + CONVERT(varchar(2), bd.company_id), 2)
+				+ RIGHT('00' + CONVERT(varchar(2), bd.profit_ctr_id), 2)
+				+ RIGHT(bd.gl_account_code, 3),
+			NULL AS sequence_id,
+			ISNULL(REPLACE(p_frf.JDE_BU, 'XXX', RIGHT(bd.JDE_BU, 3)), 'XXXXXXX'),
+			ISNULL(p_frf.JDE_object, 'XXXXX'),
+			p_frf.AX_MainAccount,
+			REPLACE(p_frf.AX_Dimension_1, 'XXX', pc.AX_Dimension_1),
+			REPLACE(p_frf.AX_Dimension_2, 'XXXXX', pc.AX_Dimension_2),
+			REPLACE(p_frf.AX_Dimension_3, 'XXX',bd.AX_Dimension_3),
+			REPLACE(p_frf.AX_Dimension_4, 'XXXX',bd.AX_Dimension_4),
+			REPLACE(p_frf.AX_Dimension_5_Part_1, 'XXXXXXXX', bd.AX_Dimension_5_Part_1),
+			REPLACE(p_frf.AX_Dimension_5_Part_2, 'XXXX', bd.AX_Dimension_5_Part_2),
+			REPLACE(p_frf.AX_Dimension_6,'XXX',bd.AX_Dimension_6),
+			NULL,
+			NULL,
+			bd.currency_code
+		FROM #BillingDetail bd
+		INNER JOIN BillingType bt ON bt.billing_type = 'FRF'
+		INNER JOIN #Billing b ON b.billing_uid = bd.billing_uid
+		--INNER JOIN ProfitCenter pc ON pc.company_ID = bd.company_id AND pc.profit_ctr_ID = bd.profit_ctr_id 
+		INNER JOIN ProfitCenter pc ON  
+			pc.company_ID = CASE WHEN bd.dist_company_id is null or bd.dist_company_id = 0 THEN bd.company_id ELSE bd.dist_company_id END
+		    AND pc.profit_ctr_ID = CASE WHEN bd.dist_profit_ctr_ID is null THEN bd.profit_ctr_ID ELSE bd.dist_profit_ctr_ID END
+		INNER JOIN WorkOrderHeader woh ON woh.company_id = b.company_id
+			AND woh.profit_ctr_id = b.profit_ctr_id
+			AND woh.workorder_id = b.receipt_id
+			--AND woh.salesforce_invoice_csid is null
+		INNER JOIN WorkOrderDetail wod ON wod.company_id = b.company_id
+			AND wod.profit_ctr_id = b.profit_ctr_id
+			AND wod.workorder_id = b.receipt_id
+			AND woh.fixed_price_flag = 'T' AND wod.bill_rate = 0
+			AND wod.resource_type in ('E', 'L', 'S', 'O', 'G')
+		JOIN ResourceClassDetail rcd
+			ON wod.company_id = rcd.company_id
+			AND wod.profit_ctr_id = rcd.profit_ctr_id
+			AND wod.resource_class_code = rcd.resource_class_code
+			AND wod.bill_unit_code = rcd.bill_unit_code
+			and rcd.regulated_fee = 'F'
 		LEFT OUTER JOIN Product p_frf ON p_frf.product_code = 'FRF' 
 			AND p_frf.product_type = 'X' 
 			AND p_frf.status = 'A' 

@@ -1,13 +1,14 @@
 DROP PROC IF EXISTS sp_container_inventory_calc_older_content
 GO
-CREATE PROC [dbo].[sp_container_inventory_calc_older_content] (
+CREATE OR ALTER PROCEDURE [dbo].[sp_container_inventory_calc_older_content] (
                 @copc_list                                          varchar(max) = NULL -- Optional list of companies/profitcenters to limit by
                 , @disposed_flag             char(1)                                                  -- 'D'isposed or 'U'ndisposed
-                , @as_of_date                  datetime = NULL                               -- Billing records are run AS OF @as_of_date. Defaults to current date.
+                , @as_of_date                 datetime = NULL                               -- Billing records are run AS OF @as_of_date. Defaults to current date.
 )
 AS
 /* *****************************************************************************************************
 DevOps 39130 info_gde 07/27/2022; New Report > "Container Inventory (as of today) - Audit of Containers with Older Contents"
+Rally # SG - DE34282: Container Inventory Report (Audit of Containers with Older Contents) Missing Data
 
 sp_container_inventory_calc_older_content
                 Recursive container retrieval for current (as of @as_of_date ) Un/Disposed inventory set.
@@ -79,7 +80,7 @@ left outer join Receipt r (nolock)
 where 
 	c.company_id = @run_for_company_id 
 	and c.profit_ctr_id = @run_for_profit_ctr_id 
-	and cd.status in ('N')
+	and c.status = 'N'
 
 
 update #ContainerInventoryWork set oldest_contents_date = NULL
@@ -117,18 +118,34 @@ begin
 
 	select '01/01/1900' as date_added, * into #temp from dbo.fn_container_source(@company_id, @profit_ctr_id, @receipt_id, @line_id, @container_id, @sequence_id, 1)
 
-	update #temp set date_added = (
-	select top 1 format(receipt_date, 'MM/dd/yyyy') from receipt where company_id = #temp.company_id and profit_ctr_id = #temp.profit_ctr_id and receipt_id = #temp.receipt_id and #temp.container_type = 'R'
-	)
-	where #temp.container_type = 'R'
+	UPDATE #temp 
+	SET date_added = (SELECT FORMAT(min(receipt_date), 'MM/dd/yyyy') 
+					  FROM receipt 
+					  WHERE receipt_id = #temp.receipt_id
+					  AND company_id = #temp.company_id 
+					  AND profit_ctr_id = #temp.profit_ctr_id 
+					  AND #temp.container_type = 'R'
+					 )
+	WHERE #temp.container_type = 'R'
+	
+	UPDATE #temp
+	SET date_added = (SELECT format(min(date_added), 'MM/dd/yyyy') 
+					    FROM container 
+					    WHERE company_id = #temp.company_id 
+					    AND profit_ctr_id = #temp.profit_ctr_id 
+					    AND receipt_id = #temp.receipt_id 
+					    AND container_id = #temp.container_id
+					    AND line_id = #temp.line_id 
+					    AND container_type = 'S'
+					 )
+	WHERE #temp.container_type = 'S'
 
-	update #temp set date_added = (
-	select top 1 format(date_added, 'MM/dd/yyyy') from container where company_id = #temp.company_id and profit_ctr_id = #temp.profit_ctr_id and receipt_id = #temp.receipt_id and line_id = #temp.line_id and container_id = #temp.container_id and sequence_id = #temp.sequence_id and #temp.container_type = 'S'
-	)
-	where #temp.container_type = 'S'
+	
+	--Select * from #temp
+	--select min(convert(date,date_added)) from #temp 
+	--RETURN
 
---	select * from #temp
-	update #ContainerInventoryWork set processed_flag = '1', oldest_contents_date = (select min(date_added) from #temp)
+	update #ContainerInventoryWork set processed_flag = '1', oldest_contents_date = (select min(convert(date,date_added)) from #temp)
 		where company_id = @company_id 
 			and profit_ctr_id = @profit_ctr_id 
 			and container_type = @container_type 
@@ -136,6 +153,9 @@ begin
 			and line_id = @line_id
 			and container_id = @container_id 
 			and sequence_id = @sequence_id
+
+	--SELECT * from #ContainerInventoryWork
+	--RETURN
 
 end
 
@@ -151,6 +171,8 @@ order by container_date asc
 
     
 GO
+
+
 GRANT EXECUTE
     ON OBJECT::[dbo].[sp_container_inventory_calc_older_content] TO [EQWEB]
     AS [dbo];
@@ -159,9 +181,8 @@ GRANT EXECUTE
     ON OBJECT::[dbo].[sp_container_inventory_calc_older_content] TO [COR_USER]
     AS [dbo];
 
-
-
 GO
 
 GRANT EXECUTE ON [dbo].[sp_container_inventory_calc_older_content] TO [EQAI]
 
+GO

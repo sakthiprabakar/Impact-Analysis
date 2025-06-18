@@ -1,7 +1,4 @@
-﻿DROP PROCEDURE IF EXISTS [dbo].[sp_tri]
-GO
-
-CREATE PROCEDURE [dbo].[sp_tri]
+﻿CREATE OR ALTER PROCEDURE [dbo].[sp_tri]
 	@company_id		int
 ,	@profit_ctr_id		int
 ,	@date_from		datetime
@@ -97,6 +94,7 @@ record_type = 5, This information is the total by treatmentprocess for the whole
 				If the 'Typical' value is null and the 'Min' value is null and 'Max' is not null, then use the 'Max' value for reporting purposes.
 				If the 'Typical' value is null, and the 'Min' is not null and the 'Max' is not null, then use mid-point of 'Min' and 'Max' values for reporting purposes.
 				If the 'Typical' value is null, and the 'Max' value is null, but the 'Min' value is not null, then use the 'Min' value for reporting purposes.
+05/29/2025 KS - Rally US116196 - Constituent - Integer data type preventing CAS # entry
 sp_tri 21, 00, '01/01/2015', '01/31/2015', 'ALL', -99, 1, 'category' , 0
 sp_tri 21, 00, '04/20/2018', '04/25/2018', 'ALL', -99, 2, 'category' , 0
 
@@ -108,7 +106,7 @@ DECLARE
 	@profit_ctr_name			varchar(50),
 	@const_id					int,
 	@report_group				varchar(8),
-	@CAS_code					int,
+	@CAS_code					bigint,
 	@const_desc					varchar(50),
 	@record_type 				int,
 	@treatment_process_pounds	float,
@@ -136,7 +134,8 @@ DECLARE
 	@disp_service_process  		varchar(20),
 	@disposal_service_process_max varchar(20),
 	@report_group_id			varchar(8)
-				
+
+DROP TABLE IF EXISTS #tri_work_table;				
 CREATE TABLE #tri_work_table ( 
 	company_id				int			null
 ,	profit_ctr_id			int			null
@@ -151,7 +150,7 @@ CREATE TABLE #tri_work_table (
 ,	unit					varchar(10) null
 ,	density					float		null
 ,	const_id				int			null
-,	cas_code				int			null
+,	cas_code				bigint		null
 ,	const_desc				varchar(50) null
 ,	quantity				float		null
 ,	bill_unit_code			varchar(4)	null
@@ -179,7 +178,44 @@ CREATE TABLE #tri_work_table (
 SET NOCOUNT ON
 
 -- Insert into #tri_work_table
-INSERT #tri_work_table
+INSERT INTO #tri_work_table
+	(company_id,
+	profit_ctr_id,
+	receipt_id,
+	line_id,
+	bulk_flag,
+	container_id,
+	treatment_id,
+	treatment_desc,
+	approval_code,
+	concentration,
+	unit,
+	density,
+	const_id,
+	cas_code,
+	const_desc,
+	quantity,
+	bill_unit_code,
+	container_size,
+	pound_conv,
+	container_count,
+	pounds_received,
+	consistency,
+	c_density,
+	pounds_constituent,
+	ppm_concentration,
+	location,
+	waste_type_code,
+	TRI_category,
+	location_report_flag,
+	generator_name,
+	TRI_flag,
+	treatment_process_id,
+	treatment_process,
+	disposal_service,
+	air_permit_status_code,
+	air_permit_flag
+	)
 SELECT	
 	Container.company_id,
 	Container.profit_ctr_id,
@@ -502,14 +538,14 @@ WHERE Company.company_id = @company_id
 IF @report_type = 1
 /*** Report type 1 is the TRI Summary ***/
 BEGIN
-	-- CREATE #tri_work_table_2
+	DROP TABLE IF EXISTS #tri_work_table_2;	
 	CREATE TABLE #tri_work_table_2 (
 		record_type					int			NULL
 	,	company_id					int			NULL
 	,	profit_ctr_id				int			NULL
 	,	const_id					int			NOT NULL
 	,	report_group				varchar(8)	NOT NULL
-	,	CAS_code					int			NULL
+	,	CAS_code					bigint		NULL
 	,	const_desc					varchar(50)	NULL
 	,	treatment_id				int			NULL
 	,	treatment_desc				varchar(40)	NULL
@@ -530,6 +566,28 @@ BEGIN
 	
 	-- INSERT #tri_work_table_2
 	INSERT INTO #tri_work_table_2
+		(record_type,
+		company_id,
+		profit_ctr_id,
+		const_id,
+		report_group,
+		CAS_code,
+		const_desc,
+		treatment_id,
+		treatment_desc,
+		sum_pounds,
+		waste_type_code,
+		location_report_flag,
+		location,
+		subtotal_pounds,
+		treatment_process_pounds,
+		total_pounds,
+		avg_concentration,
+		lbs_received,
+		treatment_process_id,
+		treatment_process,
+		tri_flag,
+		disposal_service)
 	SELECT
 		1 AS record_type,
 		company_id,
@@ -562,6 +620,53 @@ BEGIN
 	IF @debug = 1 PRINT 'SELECT COUNT FROM #tri_work_table_2'	
 	IF @debug = 1 SELECT COUNT(1) FROM #tri_work_table_2
 
+	DROP TABLE IF EXISTS #tri_work_table_4;	
+	CREATE TABLE #tri_work_table_4 (
+		record_type					int			NULL
+	,	company_id					int			NULL
+	,	profit_ctr_id				int			NULL
+	,	const_id					int			NOT NULL
+	,	report_group				varchar(8)	NOT NULL
+	,	CAS_code					bigint		NULL
+	,	const_desc					varchar(50)	NULL
+	,	treatment_id				int			NULL
+	,	treatment_desc				varchar(40)	NULL
+	,	sum_pounds					float		NULL
+	,	location_report_flag		char(1)		NULL
+	,	location					varchar(20)	NULL
+	,	subtotal_pounds				float		NULL
+	,	treatment_process_pounds	float		NULL
+	,	total_pounds				float		NULL
+	,	avg_concentration			float		NULL
+	,	lbs_received				float		NULL 
+	,	treatment_process_id		int			NULL
+	,	treatment_process			varchar(30)	NULL
+	,	tri_flag					char(1)		NULL
+	,   disposal_service			varchar(20) NULL
+	)
+
+	INSERT INTO #tri_work_table_4
+		(record_type,
+		company_id,
+		profit_ctr_id,
+		const_id,
+		report_group,
+		CAS_code,
+		const_desc,
+		treatment_id,
+		treatment_desc,
+		sum_pounds,
+		location_report_flag,
+		location,
+		subtotal_pounds,
+		treatment_process_pounds,
+		total_pounds,
+		avg_concentration,
+		lbs_received,
+		treatment_process_id,
+		treatment_process,
+		tri_flag,
+		disposal_service)
 	SELECT
 		record_type,
 		company_id,
@@ -584,7 +689,6 @@ BEGIN
 		treatment_process,
 		tri_flag,
 		disposal_service
-	INTO #tri_work_table_4
 	FROM #tri_work_table_2
 	GROUP BY record_type, company_id, profit_ctr_id,const_id, report_group, cas_code, const_desc, treatment_id, treatment_desc, 
 		 subtotal_pounds, treatment_process_pounds, total_pounds, treatment_process_id, treatment_process, tri_flag, disposal_service
@@ -963,9 +1067,8 @@ ELSE
 		treatment_process,
 		disposal_service
 	ORDER BY const_id, CAS_code, treatment_id, approval_code 
-
 GO
-GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_tri] TO [EQAI]
-    AS [dbo];
 
+GRANT EXECUTE
+    ON OBJECT::[dbo].[sp_tri] TO [EQAI];
+GO

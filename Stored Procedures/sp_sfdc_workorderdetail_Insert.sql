@@ -1,12 +1,12 @@
 USE [PLT_AI]
 GO
-/****** Object:  StoredProcedure [dbo].[sp_sfdc_workorderdetail_Insert]    Script Date: 12/18/2024 5:01:39 PM ******/
+/****** Object:  StoredProcedure [dbo].[sp_sfdc_workorderdetail_Insert]    Script Date: 4/29/2025 8:55:24 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-ALTER PROCEDURE [dbo].[sp_sfdc_workorderdetail_Insert] 
+CREATE OR ALTER PROCEDURE [dbo].[sp_sfdc_workorderdetail_Insert] 
 						@manifest varchar(15) null,
 						@salesforce_bundle_id varchar(10) null,
 						@resource_type char(1) null,						
@@ -86,6 +86,7 @@ US126358 & 126371 -- Modified by Venu & Nagaraj to implement the disposal line r
 DE35855 -- Modified by Venu to fix the error out line remove for the previous instance
 DE35882 -- Modified by Venu to additional attribute for start & end date
 US#131973  - 12/18/2024 Venu - Added validation if SF invoke this proceudre for Disposal record
+US#151982  - 04/29/2025 Removed company condition to derive cost qty
 USE PLT_AI
 GO
 Declare @response nvarchar(max);
@@ -909,7 +910,7 @@ Begin
 				Select @billing_sequence_id =  COALESCE(max(billing_sequence_id),0) + 1 + @billing_sequence_id_disposal from SFSWorkOrderdetail where sfs_workorderheader_uid = @sfs_workorderheader_uid and resource_type=@resource_type
 				
 				--Devops#89645  --Start
-				IF (@resource_type ='L' OR @resource_type ='E') and (@company_id=72 or @company_id=71 or @company_id=63 or @company_id=64)
+				IF (@resource_type ='L' OR @resource_type ='E') /*and (@company_id=72 or @company_id=71 or @company_id=63 or @company_id=64)*/ --Commented for US#151982
 				Begin
 				Set @cost_quantity= cast(@extEnded_cost as float) / cast (@cost as float)
 				End
@@ -1193,8 +1194,10 @@ End
 Return 0
 
 
-Go
 GO
+
+-- Check if the SP was altered successfully
+EXECUTE sp_print_result @@error,'sp_sfdc_workorderdetail_Insert', 'Stored Procedure', 'ALTER', ''
 
 GRANT EXECUTE ON OBJECT::[dbo].[sp_sfdc_workorderdetail_Insert] TO EQAI  
 

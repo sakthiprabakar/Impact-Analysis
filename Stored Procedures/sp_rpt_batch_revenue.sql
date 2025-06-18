@@ -1,4 +1,7 @@
-﻿CREATE PROCEDURE sp_rpt_batch_revenue
+﻿USE plt_ai
+GO
+
+CREATE OR ALTER PROCEDURE sp_rpt_batch_revenue
 	@company_id			int
 ,	@profit_ctr_id		int
 ,	@date_from			datetime
@@ -28,6 +31,7 @@ This SP reports the amount of revenue collected for the specified batch.
 				moved to Plt_AI
 05/01/2020 PRK	Modified to use the recursive function (dbo.fn_container_consolidation_value) 
 				that gets the revenue for an inbound container	taking into account gathering of consolidations.
+03/20/2025 AM   Rollback DE34715 changes, since they are casuing prod issues
 
 sp_rpt_batch_revenue 32, 0, '2018-01-01', '2019-08-31', 'TANKER', '10'
 sp_rpt_batch_revenue 32, 0, '2018-01-01', '2019-08-31', 'TANKER', '10'
@@ -310,6 +314,4 @@ GO
 
 GO
 GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_rpt_batch_revenue] TO [EQAI]
-    AS [dbo];
-
+    ON OBJECT::[dbo].[sp_rpt_batch_revenue] TO [EQAI];

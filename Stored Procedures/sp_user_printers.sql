@@ -1,20 +1,21 @@
-﻿CREATE PROCEDURE [dbo].[sp_user_printers]
-	@user_code 		varchar(8), 
-	@connect_type		varchar(10),
-	@printer_container_label	varchar(200),
-	@printer_lab_label	varchar(200),
-	@printer_manifest	varchar(200),
-	@printer_nonhaz_manifest varchar(200),
-	@printer_continuation	varchar(200),
-	@printer_wo		varchar(200),
-	@printer_wo_label	varchar(200),
-	@printer_container_label_mini	varchar(200),
-	@printer_haz_label	varchar(200),
-	@printer_nonhaz_label	varchar(200),
-	@printer_pdf	varchar(200),
-	@printer_fax	varchar(200),
-    @printer_nonrcra_label varchar(200),
-    @printer_universal_label varchar(200)
+﻿ALTER PROCEDURE dbo.sp_user_printers
+	  @user_code 		VARCHAR(8)
+	, @connect_type		VARCHAR(10)
+	, @printer_container_label	VARCHAR(200)
+	, @printer_lab_label	VARCHAR(200)
+	, @printer_manifest	VARCHAR(200)
+	, @printer_nonhaz_manifest VARCHAR(200)
+	, @printer_continuation	VARCHAR(200)
+	, @printer_wo		VARCHAR(200)
+	, @printer_wo_label	VARCHAR(200)
+	, @printer_container_label_mini	VARCHAR(200)
+	, @printer_haz_label	VARCHAR(200)
+	, @printer_nonhaz_label	VARCHAR(200)
+	, @printer_pdf	VARCHAR(200)
+	, @printer_fax	VARCHAR(200)
+    , @printer_nonrcra_label VARCHAR(200)
+    , @printer_universal_label VARCHAR(200)
+	, @printer_default	VARCHAR(200)
 AS
 /**************************************************************************
 Filename:	L:\Apps\SQL\EQAI\Plt_AI\sp_user_printers.sql
@@ -29,42 +30,49 @@ PB Object(s):	d_sp_user_printers
 10/09/2007 JDB	Modified to use new servers for Test and Dev.  Databases
 		no longer have _TEST and _DEV in the names.
 05/08/2008 rg   added two new printers: non rcra and unversal
-06/03/2020 MPM  DevOps 16147 - Increased "printer" input parameters to varchar(200).
+06/03/2020 MPM  DevOps 16147 - Increased "printer" input parameters to VARCHAR(200).
 02/17/2021 GDE  DevOps 18098 - Added nonhaz_manifest printer
+03/17/2025 SAILAJA  Rally# US142011 - Added printer_default
+--Updated by Blair Christensen for Titan 05/21/2025
+
 sp_user_printers 'rik_g', '', '', '', '', '', '', '', '', '', '', '', '','',''
 **************************************************************************/
-DECLARE @msg		varchar(100),
-	@errorcount	int
-
-SELECT @msg = ''
-SELECT @errorcount = 0
-
-UPDATE	Users 
-SET 	printer_container_label = @printer_container_label,
-	printer_lab_label = @printer_lab_label, 
-	printer_manifest = @printer_manifest,
-	printer_continuation = @printer_continuation, 
-	printer_wo = @printer_wo,
-	printer_wo_label = @printer_wo_label,
-	printer_container_label_mini = @printer_container_label_mini,
-	printer_haz_label = @printer_haz_label,
-	printer_nonhaz_label = @printer_nonhaz_label,
-	printer_pdf = @printer_pdf,
-	printer_fax = @printer_fax,
-    printer_nonrcra_label = @printer_nonrcra_label,
-    printer_universal_label = @printer_universal_label,
-	printer_nonhaz_manifest = @printer_nonhaz_manifest
-WHERE user_code = @user_code
-IF @@ERROR <> 0 
 BEGIN
-	SELECT @msg = 'Error updating user in Users table'
-	SELECT @errorcount = 1
+	DECLARE @msg VARCHAR(100)
+		  ,	@errorcount	INTEGER
+
+	SET @msg = '';
+	SET @errorcount = 0;
+
+	UPDATE dbo.Users 
+	   SET printer_container_label = @printer_container_label
+	     , printer_lab_label = @printer_lab_label
+		 , printer_manifest = @printer_manifest
+		 , printer_continuation = @printer_continuation
+		 , printer_wo = @printer_wo
+		 , printer_wo_label = @printer_wo_label
+		 , printer_container_label_mini = @printer_container_label_mini
+		 , printer_haz_label = @printer_haz_label
+		 , printer_nonhaz_label = @printer_nonhaz_label
+		 , printer_pdf = @printer_pdf
+		 , printer_fax = @printer_fax
+		 , printer_nonrcra_label = @printer_nonrcra_label
+		 , printer_universal_label = @printer_universal_label
+		 , printer_nonhaz_manifest = @printer_nonhaz_manifest
+		 , printer_default = @printer_default
+	 WHERE user_code = @user_code;
+
+	IF @@ERROR <> 0 
+		BEGIN
+			SET @msg = 'Error updating user in Users table'
+			SET @errorcount = 1
+		END
+
+	SELECT @msg;
 END
-
-SELECT @msg
-
 GO
+
 GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_user_printers] TO [EQAI]
-    AS [dbo];
+    ON OBJECT::[dbo].[sp_user_printers] TO [EQAI];
+GO
 

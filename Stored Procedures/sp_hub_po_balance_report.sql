@@ -7,10 +7,16 @@ GO
 CREATE PROCEDURE [dbo].[sp_hub_po_balance_report]
     @customer_id INT = NULL,
     @customer_type VARCHAR(20) = NULL,
-    @invoice_date_start DATETIME = NULL,
-    @invoice_date_end DATETIME = NULL,
+    @transaction_date_start DATETIME = NULL,
+    @transaction_date_end DATETIME = NULL,
     @user_code VARCHAR(20) = NULL,    
-    @permission_id INT
+    @permission_id INT,
+	@purchase_order VARCHAR(20) = NULL,
+	@release_code VARCHAR(20) = NULL,
+	@invoice_code VARCHAR(16) = NULL,
+	@receipt_id int= NULL,
+	@status_code_list varchar(20), --'I,S,N,H',
+	@trans_source_list VARCHAR(20) -- 'R, W'
 AS
 BEGIN
 
@@ -24,30 +30,74 @@ BEGIN
     Description: New Purchase Order Balance Report for EQAI customers in the HUB.
 
     Example execution:
-        EXEC sp_hub_po_balance_report  
-       -- @customer_id = 601113 
-        @customer_type = 'amazon'
-       ,@invoice_date_start = '1/1/2000'
-       ,@invoice_date_end = '12/31/2024'
-       ,@user_code = 'JONATHAN'
-      ,@permission_id = 353
+    EXEC [dbo].[sp_hub_po_balance_report]  
+    ---@customer_id = 602305,
+    @customer_type = '*Any*',
+    @transaction_date_start = '2024-05-28',
+    @transaction_date_end = '2025-03-01',
+    @user_code = 'JONATHAN',
+    @permission_id = 353,
+    @purchase_order = '173671257',
+    @release_code = '',
+    @invoice_code = '1062642',
+    @receipt_id = NULL,
+    @status_code_list = 'I',
+    @trans_source_list = 'R,W';
 
     SELECT  customer_type, count(*) FROM    customer GROUP BY customer_type order by count(*) desc
    ****************************************************************************************/
 
     SET NOCOUNT ON;
+
+	 DECLARE @status_code TABLE (i_status CHAR(1));
+
+    -- Populate @status_code table if not 'all'  	
+		IF (@status_code_list is not null and @status_code_list <> '')
+	begin
+        INSERT INTO @status_code (i_status)
+        SELECT LEFT(row, 1)
+        FROM dbo.fn_SplitXsvText(',', 1, @status_code_list)
+        WHERE row IS NOT NULL;
+	end
+	else 	 
+	begin
+		set  @status_code_list = null
+	end
+
+	DECLARE @trans_source TABLE (i_trans_source CHAR(1));
+
+    -- Populate @trans_source table if not 'all'  
+    IF (@trans_source_list IS NOT NULL AND @trans_source_list <> '')
+    begin
+        INSERT INTO @trans_source (i_trans_source)
+        SELECT LEFT(row, 1)
+        FROM dbo.fn_SplitXsvText(',', 1, @trans_source_list)
+        WHERE row IS NOT NULL;
+    end
+    else
+    begin
+        SET @trans_source_list = NULL
+    end
+
+		if (@customer_type = '*Any*') SET @customer_type = null
+
+		if (@purchase_order = '') set @purchase_order = null
+		if (@release_code = '')   set @release_code = null
+		if (@invoice_code = '')   set @invoice_code = null
 	
     IF @user_code = ''
         SET @user_code = NULL;
 
-    -- Handle invoice_date_end 
-    IF @invoice_date_end IS NOT NULL
+   -- Declare variables for date range
+    DECLARE @start_date DATETIME = DATEADD(MONTH, DATEDIFF(MONTH, 0, GETDATE()), 0);
+    DECLARE 
+        @i_date_start DATETIME = ISNULL(@transaction_date_start, @start_date),
+        @i_date_end   DATETIME = ISNULL(@transaction_date_end, DATEADD(DAY, -1, DATEADD(MONTH, 1, @start_date)));
+
+     IF DATEPART(HOUR, @i_date_end) = 0
     BEGIN
-           IF DATEPART(HOUR, @invoice_date_end) = 0 AND DATEPART(MINUTE, @invoice_date_end) = 0 
-           AND DATEPART(SECOND, @invoice_date_end) = 0
-        BEGIN
-            SET @invoice_date_end = DATEADD(MILLISECOND, -3, DATEADD(DAY, 1, @invoice_date_end))  -- 23:59:59.997
-        END
+        SET @i_date_end = DATEADD(SECOND, 0.99999, @i_date_end);
+    
     END
 
       Drop Table If Exists #SecuredCustomer
@@ -91,6 +141,8 @@ BEGIN
         INNER JOIN CustomerBilling cb ON c.customer_id = cb.customer_id
         INNER JOIN CustomerBillingPO cbpo ON cb.customer_id = cbpo.customer_id 
             AND cb.billing_project_id = cbpo.billing_project_id
+		 WHERE (cbpo.purchase_order = ISNULL(@purchase_order, cbpo.purchase_order))
+           AND (cbpo.release = ISNULL(@release_code, cbpo.release))
     ),
     cb_contact AS ( --- could be multiple per customer_id, billing_project_id or none
         SELECT 
@@ -146,6 +198,7 @@ BEGIN
         co.contact_type,
         co.name AS Contact_Name,
         co.email AS Contact_Email,
+		cb.status,
         cb.PO_type,
         cb.purchase_order,
         cb.PO_description,
@@ -153,8 +206,8 @@ BEGIN
         cb.start_date,
         cb.expiration_date,
         cb.PO_amt,
-        @invoice_date_start AS Invoice_Date_Range_Start,
-        @invoice_date_end AS Invoice_Date_Range_End,
+        @transaction_date_end AS Invoice_Date_Range_Start,
+        @transaction_date_end AS Invoice_Date_Range_End,
         MIN(b.invoice_date) AS First_Invoice_Date,
         MAX(b.invoice_date) AS Last_Invoice_Date,
         SUM(b.total_extended_amt) AS Sum_Billed_Amt,
@@ -171,22 +224,45 @@ BEGIN
 		b.line_id,
 		b.billing_date AS TransactionDate,
 		b.status_code AS TransactionStatus,
-	    b.total_extended_amt,
 		b.invoice_code,
 		b.invoice_date,
+		b.total_extended_amt,
 		CONCAT(bd.AX_Dimension_5_Part_1, '', bd.AX_Dimension_5_Part_2) AS D365ProjectID,
-		csr.user_name AS InternalContact
+		csr.user_name AS InternalContact,
+		COALESCE((
+        SELECT SUM(BillingDetail.extended_amt)
+        FROM Billing AS SubBilling
+        JOIN BillingDetail 
+            ON SubBilling.receipt_id = BillingDetail.receipt_id
+            AND SubBilling.company_id = BillingDetail.company_id
+            AND SubBilling.profit_ctr_id = BillingDetail.profit_ctr_id
+            AND SubBilling.trans_source = BillingDetail.trans_source
+            AND SubBilling.billing_uid = BillingDetail.billing_uid 
+        JOIN BillingType
+            ON BillingDetail.billingtype_uid = BillingType.billingtype_uid
+        WHERE SubBilling.customer_id = cb.customer_id
+          AND SubBilling.purchase_order = cb.purchase_order
+          AND SubBilling.status_code IN ('H', 'S', 'N', 'I')
+         AND (@release_code IS NULL OR ISNULL(SubBilling.release_code, '') = ISNULL(@release_code, ''))
+    ), 0) AS AmountUsed
     FROM cb
     join contact_reduction cr 
       on cb.customer_ID = cr.customer_ID and cb.billing_project_id = cr.billing_project_id
     join cb_contact co
       on cb.customer_ID = co.customer_ID and cb.billing_project_id = co.billing_project_id and cr.min_contact_order = co.contact_order
     LEFT JOIN Billing b 
-        ON cb.customer_id = b.customer_id
-        AND cb.purchase_order = b.purchase_order
-        AND b.status_code = 'I' -- Invoice status
-        AND ((@invoice_date_start is null and @invoice_date_end is null) or (b.invoice_date BETWEEN @invoice_date_start AND @invoice_date_end))
-		LEFT JOIN BillingDetail bd 
+        ON cb.customer_id = b.customer_id AND cb.purchase_order = b.purchase_order 
+		AND (@invoice_code IS NULL OR b.invoice_code = @invoice_code)
+        AND (@receipt_id IS NULL OR b.receipt_id = @receipt_id) 
+		AND (@status_code_list is null or b.status_code in (select i_status from @status_code))
+		AND (@trans_source_list is null or b.trans_source in (select i_trans_source from @trans_source))
+		AND  (b.billing_date BETWEEN @i_date_start AND @i_date_end)  
+    LEFT JOIN BillingComment bc
+	On b.receipt_id = bc.receipt_id
+	AND b.company_id = bc.company_id
+	AND b.profit_ctr_id = bc.profit_ctr_id
+	AND b.trans_source = bc.trans_source
+      	LEFT JOIN BillingDetail bd 
         ON b.billing_uid = bd.billing_uid
 		LEFT JOIN usersxeqcontact csrx 
         ON cb.customer_service_id = csrx.type_id
@@ -219,9 +295,9 @@ BEGIN
 		b.line_id,
 		b.billing_date,
 		b.status_code,
-	    b.total_extended_amt,
 		b.invoice_code,
 		b.invoice_date,
+		b.total_extended_amt,
 		bd.AX_Dimension_5_Part_1,
         bd.AX_Dimension_5_Part_2,
 		csr.user_name 

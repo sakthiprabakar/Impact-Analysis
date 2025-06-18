@@ -33,6 +33,7 @@ PB Object(s):	d_invoice_print_detail
 04/16/2024 AM   DevOps:80418 - Added invoice_summary_output_flag
 05/10/2024 KS	DevOps:87211 - Added ISNULL to handle invoice_summary_output_flag column's NULL values. 
 05/27/2024 SG	Devops:74130 -- Added Case condition for date_service
+05/19/2025 AKA  Rally:DE39146 - Added workorder fixed price and print_on_invoice_flag 
 
 sp_invoice_print_detail 1129844, 1
 sp_invoice_print_detail 1153777, 1
@@ -135,7 +136,8 @@ SELECT InvoiceHeader.cust_name,
 	case CustomerBilling.print_resource_class_type_flag when 'T' then 
 	(case Billing.workorder_resource_type  when 'D' then 'Disposal' when 'E' then 'Equipment' when 'L' then 'Labor' when 'S' then 'Supplies' when 'O' then 'Other' when 'G' then 'Groups' else '' end )
 	else '' end as resource_type_desc,
-	ISNULL(CustomerBilling.invoice_summary_output_flag, 'F') AS invoice_summary_output_flag
+	ISNULL(CustomerBilling.invoice_summary_output_flag, 'F') AS invoice_summary_output_flag,
+	CASE WHEN WorkOrderHeader.fixed_price_flag = 'T' AND WorkOrderDetail.print_on_invoice_flag = 'T' THEN 'T' ELSE 'F' END AS print_on_invoice_flag
 FROM InvoiceDetail
 JOIN InvoiceHeader ON (InvoiceDetail.invoice_id = InvoiceHeader.invoice_id
 	AND InvoiceDetail.revision_id = InvoiceHeader.revision_id)
@@ -157,6 +159,11 @@ LEFT OUTER JOIN WorkOrderDetail ON WorkOrderDetail.workorder_ID = Billing.receip
       AND WorkOrderDetail.profit_ctr_ID = Billing.profit_ctr_id
       AND WorkOrderDetail.resource_type = Billing.workorder_resource_type
       AND WorkOrderDetail.sequence_ID = Billing.workorder_sequence_id
+LEFT OUTER JOIN WorkorderHeader ON WorkorderHeader.workorder_ID = Billing.receipt_id
+      AND WorkorderHeader.profit_ctr_ID = Billing.profit_ctr_id
+      AND WorkorderHeader.company_id = Billing.company_id
+	  AND WorkorderHeader.customer_id= Billing.customer_id
+	  AND Billing.trans_source = 'W'
 LEFT OUTER JOIN Receipt ON Receipt.receipt_ID = Billing.receipt_id
       AND Receipt.company_id = Billing.company_id
       AND Receipt.profit_ctr_ID = Billing.profit_ctr_id

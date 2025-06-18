@@ -42,6 +42,7 @@ PB Object(s):	d_rpt_customer_confirmation_notes
 07/02/2024  AM  DevOps:91794 - Price Confirmation - Do not Display Profile Fee text for LabPack Profiles
 30/12/2024 Prabhu - US116932 - EQAI Price Confirmation Form Updates
 10/01/2025 Prabhu - US138059 - Price Confirmation Form > Logic to Generate "EEC Fee Terms & Conditions" Text
+03/17/2025 PP -US144643: [Continued] [Continued] EQAI Price Confirmation Form > Remove "Fuel Surcharge" Term when the "EEC Fee" Term is Present
 
 sp_rpt_customer_confirmation_notes 394385
 sp_rpt_customer_confirmation_notes 479911
@@ -67,6 +68,8 @@ DECLARE
 ,	@labpack_flag					varchar(1)
 ,	@eecfee_sequence_id			    int
 ,   @term_condition_desc            varchar(1000)
+,   @date_effective_from 	        DATETIME
+,	@date_effective_to 	            DATETIME
 
 select @emanifest_validation_date = cast(config_value as datetime) 
 from Configuration 
@@ -198,7 +201,10 @@ DEALLOCATE c_recovery_fee
 --------------------------------------------------------------------
 SELECT 
     @eecfee_sequence_id = ROW_NUMBER() OVER (ORDER BY ect.EECFeeTermsConditions_uid),
-    @term_condition_desc =ect.EECFeeterms_condition_desc
+    @term_condition_desc = ect.EECFeeterms_condition_desc,
+    @date_effective_from = cct.date_effective_from, -- Assign the date to variables
+    @date_effective_to = cct.date_effective_to 
+
 	FROM 
     CustomerEECFeeTermsConditions cct
 	INNER JOIN 
@@ -207,12 +213,21 @@ SELECT
     cct.customer_id =@customer_id
 	AND  getdate() between cct.date_effective_from and cct.date_effective_to 
 
-IF @eecfee_sequence_id > 0 AND  @frf_flag = 'T' AND ( @eir_flag = 'U' OR @eir_flag = 'F' )
-begin
-  SET @sequence_id = @eecfee_sequence_id
-  SET @note = @term_condition_desc
-  INSERT INTO #tmp_notes VALUES (@sequence_id, @note)
-end
+IF (@eecfee_sequence_id > 0)
+BEGIN
+
+   IF (((@eir_flag = 'T' OR @eir_flag = 'P') AND (@frf_flag = 'F' OR @frf_flag = 'U') AND GETDATE() BETWEEN @date_effective_from AND @date_effective_to)
+    OR (((@eir_flag = 'T' OR @eir_flag = 'P')  OR (@frf_flag = 'F' OR @frf_flag = 'U')) AND GETDATE() BETWEEN @date_effective_from AND @date_effective_to)
+    OR (@eir_flag = 'F'   AND @frf_flag = 'T' AND GETDATE() BETWEEN @date_effective_from AND @date_effective_to )
+    OR (@eir_flag = 'F'   AND @frf_flag = 'T' AND NOT (GETDATE() BETWEEN @date_effective_from AND @date_effective_to)))
+	
+    BEGIN
+        SET @sequence_id = @eecfee_sequence_id
+        SET @note = @term_condition_desc
+        INSERT INTO #tmp_notes VALUES (@sequence_id, @note)
+    END
+
+END  
 
 ----------------------------------------
 -- Note 3 - DevOps:88748 - Profile Fee 
@@ -302,10 +317,12 @@ END
 ----------------------------------------
 -- Note 9
 ----------------------------------------
-SET @sequence_id = 9
-SET @note = 'If transportation is provided, an additional fuel surcharge will apply based on the weekly US DOE fuel price index.'
-INSERT INTO #tmp_notes VALUES (@sequence_id, @note)
-
+IF NOT (@frf_flag = 'T' AND (@eir_flag = 'U' OR @eir_flag = 'F'))  
+BEGIN  
+    SET @sequence_id = 9  
+    SET @note = 'If transportation is provided, an additional fuel surcharge will apply based on the weekly US DOE fuel price index.'  
+    INSERT INTO #tmp_notes VALUES (@sequence_id, @note)  
+END  
 ----------------------------------------
 -- Note 10
 ----------------------------------------

@@ -1,4 +1,4 @@
-﻿ -- drop proc [sp_COR_GeneratorSiteTypeList]
+﻿ Drop Proc If Exists sp_COR_GeneratorSiteTypeList
  go
 
 CREATE  proc [dbo].[sp_COR_GeneratorSiteTypeList] (
@@ -83,7 +83,7 @@ declare @out table (
 	, emergency_phone_number varchar(40)
 	, emergency_contract_number varchar(40)
 	, generator_division varchar(40)
-	, generator_district varchar(40)
+	, generator_district varchar(50)
 	, generator_region_code varchar(40)
 	, generator_status varchar(10)
 	, [Internal reason Do Not Display] varchar(100)

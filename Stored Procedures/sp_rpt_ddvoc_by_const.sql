@@ -1,7 +1,4 @@
-﻿DROP PROCEDURE IF EXISTS [dbo].[sp_rpt_ddvoc_by_const]
-GO
-
-CREATE PROCEDURE sp_rpt_ddvoc_by_const
+﻿CREATE OR ALTER PROCEDURE sp_rpt_ddvoc_by_const
 	@company_id			int
 ,	@profit_ctr_id		int
 ,	@date_from			datetime
@@ -31,12 +28,14 @@ however this report only has a report type 1 (worksheet) and contains more infor
 				If the 'Typical' value is null and the 'Min' value is null and 'Max' is not null, then use the 'Max' value for reporting purposes.
 				If the 'Typical' value is null, and the 'Min' is not null and the 'Max' is not null, then use mid-point of 'Min' and 'Max' values for reporting purposes.		
 				If the 'Typical' value is null, and the 'Max' value is null, but the 'Min' value is not null, then use the 'Min' value for reporting purposes.
+05/29/2025 KS - Rally US116196 - Constituent - Integer data type preventing CAS # entry
 sp_rpt_ddvoc_by_const 2, 21, '01/01/2008', '03/31/2008', 'ALL' , -99, 11
 ***********************************************************************/
 SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
 
 DECLARE @debug int
 
+DROP TABLE IF EXISTS #tri_work_table;
 CREATE TABLE #tri_work_table ( 
 	company_id				int			null
 ,	profit_ctr_id			int			null
@@ -51,7 +50,7 @@ CREATE TABLE #tri_work_table (
 ,	unit					varchar(10) null
 ,	density					float		null
 ,	const_id				int			null
-,	cas_code				int			null
+,	cas_code				bigint		null
 ,	const_desc				varchar(50) null
 ,	quantity				float		null
 ,	bill_unit_code			varchar(4)	null
@@ -80,7 +79,42 @@ SET @debug = 0
 IF @treatment_id = -99 SET @treatment_id = NULL
 IF @treatment_category = -99 SET @treatment_category = NULL
 
-INSERT #tri_work_table
+INSERT INTO #tri_work_table
+	(company_id,
+	profit_ctr_id,
+	receipt_id,
+	line_id,
+	bulk_flag,
+	container_id,
+	treatment_id,
+	treatment_desc,
+	approval_code,
+	concentration,
+	unit,
+	density,
+	const_id,
+	cas_code,
+	const_desc,
+	quantity,
+	bill_unit_code,
+	container_size,
+	pound_conv,
+	container_count,
+	pounds_received,
+	consistency,
+	c_density,
+	pounds_constituent,
+	ppm_concentration,
+	location,
+	waste_type_code,
+	location_report_flag,
+	reportable_category,
+	reportable_category_desc,
+	generator_name,
+	process_location,
+	emission_factor,
+	control_efficiency_value,
+	pounds_emission)
 SELECT
 	Receipt.company_id,	
 	Container.profit_ctr_id,
@@ -706,10 +740,9 @@ GROUP BY
     process_location,
     emission_factor		
 ORDER BY const_id, CAS_code, treatment_id, approval_code, process_location
-
-
 GO
+
 GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_rpt_ddvoc_by_const] TO [EQAI]
-    AS [dbo];
+    ON OBJECT::[dbo].[sp_rpt_ddvoc_by_const] TO [EQAI];
+GO
 

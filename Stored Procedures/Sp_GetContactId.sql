@@ -7,39 +7,66 @@ CREATE PROCEDURE [dbo].[Sp_GetContactId]
 AS 
 /* ******************************************************************
 
-	Updated By		: Arun kumar
-	Updated On		: 24th Dec 2018
-	Type			: Stored Procedure
-	Object Name		: [Sp_GetContactId]
-
-
-	Procedure used to get contact ID from web_userid
-
-inputs 
-	
-	@UserName
-
-
-
-Samples:
-    EXEC Sp_GetContactId  @UserName
-    EXEC Sp_GetContactId  'paul.kalinka' 
+	 Updated By  : Divya Bharathi R      
+	 Updated On  : 09th Apr 2025      
+	 Type		 : Stored Procedure      
+	 Object Name : [Sp_GetContactId]      
+	 Purpose     : Procedure used to get contact information of the user      
+	 Change		 : Fetch only the needed columns
+	 Ticket		 : DE38588 - Fetch needed columns from Contact Table
+      
+	 Inputs    
+		@UserName      
+      
+	Samples:      
+		EXEC Sp_GetContactId  @UserName      
+		EXEC Sp_GetContactId  'paul.kalinka' 
 
 ****************************************************************** */
 BEGIN
-	-- SET NOCOUNT ON added to prevent extra result sets from
-	-- interfering with SELECT statements.
-	SET NOCOUNT ON;
-	Declare @contactId int
-    -- Insert statements for procedure here
-	SELECT top 1 * from [Plt_ai].[DBO].Contact as [User]
-		OUTER APPLY(SELECT 
-		CASE WHEN COUNT(*)>0 THEN 'Y' ELSE 'N' END AS IsAdminUser FROM [COR_DB]..RolesRef as Roles 
-		WHERE  RoleName='Administration' AND IsActive=1 AND Roles.RoleId IN (SELECT CXR.RoleId FROM [Plt_ai].[DBO].ContactXRole CXR WHERE CXR.Contact_ID = [User].Contact_ID)) roles
-		WHERE web_userid = @UserName
-	--print @contactId
-	return 
-	-- @contactId
+	SELECT  
+	   TOP 1   
+	   Ct.contact_id,  
+	   Ct.contact_status,  
+	   Ct.contact_company,  
+	   Ct.name,  
+	   Ct.title,  
+	   Ct.phone,  
+	   Ct.email,  
+	   Ct.email_flag,  
+	   Ct.modified_by,  
+	   Ct.date_added,  
+	   Ct.date_modified,  
+	   Ct.contact_addr1,  
+	   Ct.contact_city,  
+	   Ct.contact_state,  
+	   Ct.contact_zip_code,  
+	   Ct.web_access_flag,  
+	   Ct.first_name,  
+	   Ct.last_name,  
+	   Ct.web_userid,  
+	   Ct.cc_email,  
+	   CASE  
+		  WHEN  
+			 Roles.RoleId IS NOT NULL   
+		  THEN  
+			 'Y'   
+		  ELSE  
+			 'N'   
+	   END  
+	   AS IsAdminUser   
+	FROM  
+	   [Plt_ai].[DBO].Contact AS Ct   
+	   LEFT JOIN  
+		  [Plt_ai].[DBO].ContactXRole CXR   
+		  ON CXR.Contact_ID = Ct.Contact_ID   
+	   LEFT JOIN  
+		  [COR_DB].[DBO].RolesRef AS Roles   
+		  ON Roles.RoleId = CXR.RoleId   
+		  AND Roles.RoleName = 'Administration'   
+		  AND Roles.IsActive = 1   
+	WHERE  
+	   Ct.web_userid = @UserName 
 END
 GO
 

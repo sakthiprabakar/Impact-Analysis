@@ -508,6 +508,9 @@ third component: receipt not linked to either BLL or
             where bll.company_id = r.company_id
             and bll.profit_ctr_id = r.profit_ctr_id
             and bll.receipt_id = r.receipt_id
+			and bll.source_id is not null
+			and bll.source_company_id is not null
+			and bll.source_profit_ctr_id is not null
         )
 		and
 		(

@@ -1,6 +1,5 @@
-﻿
-create procedure sp_trip_sync_get_profitcenter
-	@trip_connect_log_id int
+﻿ALTER PROCEDURE dbo.sp_trip_sync_get_profitcenter
+	  @trip_connect_log_id INTEGER
 as
 /***************************************************************************************
  this procedure synchronizes the ProfitCenter table on a trip local database
@@ -12,123 +11,127 @@ as
  04/26/2018	- mpm - Added air_permit_flag; added @version; changed generated SQL statement from
 					"if not exists, then insert" to "delete and then insert".
  06/26/2019 - mpm - Incident 10936 - Added default_manifest_form_suffix column.
+ 01/20/2025 - bc tweak for Titan
+ 02/11/2025 - mpm - Rally TA501937
+ 02/11/2025 - MPM - Rally TA501937/US139807 - Per Blair, added GO statement at end.
 ****************************************************************************************/
-declare @s_version varchar(10),
-		@dot int,
-		@version numeric(6,2)
+BEGIN
+
+declare @s_version VARCHAR(10)
+      , @dot INTEGER
+	  , @version NUMERIC(6,2)
 
 set transaction isolation level read uncommitted
 
 select @s_version = tcca.client_app_version
-from TripConnectLog tcl, TripConnectClientApp tcca
-where tcl.trip_connect_log_id = @trip_connect_log_id
-and tcl.trip_client_app_id = tcca.trip_client_app_id
+  from TripConnectLog tcl
+       join TripConnectClientApp tcca on tcl.trip_client_app_id = tcca.trip_client_app_id
+ where tcl.trip_connect_log_id = @trip_connect_log_id
+
 
 select @dot = CHARINDEX('.',@s_version)
+
 if @dot < 1
 	select @version = CONVERT(int,@s_version)
 else
-	select @version = convert(numeric(6,2),SUBSTRING(@s_version,1,@dot-1)) +
-						(CONVERT(numeric(6,2),SUBSTRING(@s_version,@dot+1,datalength(@s_version))) / 100)
+	select @version = CONVERT(NUMERIC(6,2),SUBSTRING(@s_version,1,@dot-1))
+	                + (CONVERT(NUMERIC(6,2),SUBSTRING(@s_version,@dot+1, DATALENGTH(@s_version))) / 100)
 						
-select distinct 'delete from ProfitCenter where company_id = ' + convert(varchar(10),ProfitCenter.company_id) + ' and profit_ctr_id = ' + convert(varchar(10),ProfitCenter.profit_ctr_id)
-+ ' insert into ProfitCenter values('
-+ convert(varchar(20),ProfitCenter.company_ID) + ','
-+ convert(varchar(20),ProfitCenter.profit_ctr_ID) + ','
-+ isnull('''' + replace(ProfitCenter.profit_ctr_name, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.price_flag, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.min_charge),'null') + ','
-+ isnull('''' + convert(varchar(20),ProfitCenter.date_added,120) + '''','null') + ','
-+ isnull('''' + convert(varchar(20),ProfitCenter.date_modified,120) + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.modified_by, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.discount_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.min_price_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.confirm_flag, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.next_receipt_ID),'null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.ss_next_avail_receipt_ID),'null') + ','
-+ isnull('''' + replace(ProfitCenter.surcharge_flag, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.next_workorder_ID),'null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.next_template_ID),'null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.base_rate_quote_ID),'null') + ','
-+ isnull('''' + replace(ProfitCenter.default_transporter, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.cost_factor),'null') + ','
-+ isnull('''' + replace(ProfitCenter.address_1, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.address_2, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.address_3, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.phone, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.fax, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.EPA_ID, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.label_size),'null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.label_copies),'null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.container_label_printer),'null') + ','
-+ isnull('''' + replace(ProfitCenter.zero_billing_flag, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.receipt_days_to_warning),'null') + ','
-+ isnull('''' + replace(ProfitCenter.receipt_print_type, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.receipt_price_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.receipt_price_adjust_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.receipt_cost_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.approval_override_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.manifest_scan_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.pcb_flag, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.next_container_label_ID),'null') + ','
-+ isnull('''' + replace(ProfitCenter.approval_type, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.receipt_hours_until_problem),'null') + ','
-+ isnull('''' + replace(ProfitCenter.short_name, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.status, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.default_manifest_state, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.emergency_contact_phone, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.posting_code),'null') + ','
-+ isnull('''' + replace(ProfitCenter.view_on_web, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.default_TSDF_code, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.overhead_percent),'null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.admin_percent),'null') + ','
-+ isnull('''' + replace(ProfitCenter.waste_code_match_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.view_scheduling_on_web, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.view_approvals_on_web, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.view_waste_received_on_web, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.view_workorders_on_web, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.view_waste_summary_on_web, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.next_consolidation_ID),'null') + ','
-+ isnull('''' + replace(ProfitCenter.manifest_continuation_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.scheduling_phone, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.const_match_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.change_const_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.treatment_receipt_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.treatment_container_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.treatment_barcode_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.default_label_type, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),ProfitCenter.reapproval_days_available),'null') + ','
-+ isnull('''' + replace(ProfitCenter.CC_available, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.GN_available, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.GWA_available, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.LDR_available, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.PQ_available, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.RA_available, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.SREC_available, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.WCR_available, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.WWA_available, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.cust_serv_email, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.sched_email, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.description, '''', '''''') + '''','null') + ','
-+ '''null''' + ','
-+ isnull('''' + replace(ProfitCenter.waste_receipt_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.workorder_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.preassign_receipt_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(ProfitCenter.labpack_training_required_flag, '''', '''''') + '''','null')
-+ case when @version < 4.55 then '' else ',' + isnull('''' + replace(ProfitCenter.air_permit_flag, '''', '''''') + '''','null') end +
-+ case when @version < 4.62 then '' else ',' + isnull('''' + replace(ProfitCenter.default_manifest_form_suffix, '''', '''''') + '''','null') end +
-')' as sql
-from ProfitCenter, WorkOrderHeader, TripConnectLog
-where ProfitCenter.company_id = WorkOrderHeader.company_id
-and ProfitCenter.profit_ctr_id = WorkOrderHeader.profit_ctr_id
-and WorkOrderHeader.trip_id = TripConnectLog.trip_id
-and TripConnectLog.trip_connect_log_id = @trip_connect_log_id
-and isnull(WorkOrderHeader.field_requested_action,'') <> 'D'
-and (WorkOrderHeader.date_added > isnull(TripConnectLog.last_download_date,'01/01/1900') or
-	 WorkOrderHeader.field_requested_action = 'R')
+select distinct 'DELETE FROM ProfitCenter WHERE company_id = ' + CONVERT(VARCHAR(10),pc.company_id) + ' and profit_ctr_id = ' + CONVERT(VARCHAR(10),pc.profit_ctr_id)
+     + ' INSERT INTO ProfitCenter VALUES ('
+     + CONVERT(VARCHAR(20),pc.company_ID)
+     + ',' + CONVERT(VARCHAR(20),pc.profit_ctr_ID)
+     + ',' + ISNULL('''' + REPLACE(pc.profit_ctr_name, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.price_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.min_charge),'NULL')
+     + ',' + ISNULL('''' + CONVERT(VARCHAR(20),pc.date_added,120) + '''','NULL')
+     + ',' + ISNULL('''' + CONVERT(VARCHAR(20),pc.date_modified,120) + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(LEFT(pc.modified_by,8), '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.discount_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.min_price_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.confirm_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.next_receipt_ID),'NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.ss_next_avail_receipt_ID),'NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.surcharge_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.next_workorder_ID),'NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.next_template_ID),'NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.base_rate_quote_ID),'NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.default_transporter, '''', '''''') + '''','NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.cost_factor),'NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.address_1, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.address_2, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.address_3, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.phone, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.fax, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.EPA_ID, '''', '''''') + '''','NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.label_size),'NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.label_copies),'NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.container_label_printer),'NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.zero_billing_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.receipt_days_to_warning),'NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.receipt_print_type, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.receipt_price_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.receipt_price_adjust_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.receipt_cost_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.approval_override_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.manifest_scan_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.pcb_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.next_container_label_ID),'NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.approval_type, '''', '''''') + '''','NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.receipt_hours_until_problem),'NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.short_name, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.[status], '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.default_manifest_state, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.emergency_contact_phone, '''', '''''') + '''','NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.posting_code),'NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.view_on_web, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.default_TSDF_code, '''', '''''') + '''','NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.overhead_percent),'NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.admin_percent),'NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.waste_code_match_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.view_scheduling_on_web, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.view_approvals_on_web, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.view_waste_received_on_web, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.view_workorders_on_web, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.view_waste_summary_on_web, '''', '''''') + '''','NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.next_consolidation_ID),'NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.manifest_continuation_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.scheduling_phone, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.const_match_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.change_const_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.treatment_receipt_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.treatment_container_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.treatment_barcode_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.default_label_type, '''', '''''') + '''','NULL')
+     + ',' + ISNULL(CONVERT(VARCHAR(20),pc.reapproval_days_available),'NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.CC_available, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.GN_available, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.GWA_available, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.LDR_available, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.PQ_available, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.RA_available, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.SREC_available, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.WCR_available, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.WWA_available, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.cust_serv_email, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.sched_email, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.[description], '''', '''''') + '''','NULL')
+     + ',' + '''NULL'''
+     + ',' + ISNULL('''' + REPLACE(pc.waste_receipt_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.workorder_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.preassign_receipt_flag, '''', '''''') + '''','NULL')
+     + ',' + ISNULL('''' + REPLACE(pc.labpack_training_required_flag, '''', '''''') + '''','NULL')
+     + CASE WHEN @version < 4.55 THEN '' ELSE ',' + ISNULL('''' + REPLACE(pc.air_permit_flag, '''', '''''') + '''','NULL') END
+     + CASE WHEN @version < 4.62 THEN '' ELSE ',' + ISNULL('''' + REPLACE(pc.default_manifest_form_suffix, '''', '''''') + '''','NULL') END
+     + ')' as [sql]
+  from ProfitCenter pc
+       join WorkOrderHeader h on pc.company_id = h.company_id
+            and pc.profit_ctr_id = h.profit_ctr_id
+       join TripConnectLog tcl on h.trip_id = tcl.trip_id
+ where tcl.trip_connect_log_id = @trip_connect_log_id
+   and h.field_requested_action <> 'D'
+   and (h.date_added > ISNULL(tcl.last_download_date,'01/01/1900')
+        or h.field_requested_action = 'R')
 
+END;
 GO
-GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_trip_sync_get_profitcenter] TO [EQAI]
-    AS [dbo];
-

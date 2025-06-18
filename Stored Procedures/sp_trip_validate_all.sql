@@ -94,6 +94,7 @@ Loads to PLT_AI
 				Additional Description entered at the time of pick up in order for the manifest and paperwork to be printed." validation warning to an error.
 06/16/2023 MPM	DevOps 61118 - Added logic to produce an error when completing a trip if there are any non-voided work order detail lines with 
 				WorkOrderDetailCC.percentage = 0.
+04/02/2025 Umesh DE38463: Trip Dispatch - Need error validation for inactive approvals
 
 sp_trip_validate_all 2152,'D'
 sp_trip_validate_all 2670, 'D', 4, 15
@@ -277,6 +278,41 @@ INSERT INTO #tripvalidationall
 	  AND wo.company_id = @company_id
  	  AND wod.bill_rate <> -2
  	  and IsNull(wodu.bill_unit_code,'') = ''
+
+--------------------------------------------------------------      
+-- Look for EQ ProfileQuoteApproval with not Active approvals  
+--------------------------------------------------------------  
+Insert Into #tripvalidationall
+	(trip_id,
+	trip_sequence_id,
+	workorder_id,
+	approval_id,
+	issue_type,
+	issues,
+	trip_status)   
+ SELECT  Distinct wo.trip_id,  
+   wo.trip_sequence_id,  
+   wo.workorder_ID,  
+   wod.TSDF_approval_code,  
+   'E',  
+   'Approval is inactive',  
+             @trip_status  
+    FROM   workorderheader wo 
+	JOIN workorderdetail wod on wo.company_id = wod.company_id   
+            AND wo.profit_ctr_id = wod.profit_ctr_id   
+            AND wo.workorder_id = wod.workorder_id  
+            AND wod.resource_type = 'D'  
+            AND wod.TSDF_approval_code IS NOT NULL
+    JOIN ProfileQuoteApproval pqa on pqa.profile_id = wod.profile_id  
+           AND pqa.approval_code = wod.TSDF_approval_code  
+           AND pqa.profit_ctr_id = wod.profile_profit_ctr_id  
+		   AND pqa.company_id = wod.profile_company_id
+      JOIN TripHeader th on th.trip_id = wo.trip_id  
+      WHERE  wo.workorder_status in ('N', 'C', 'A') 
+	   AND wo.company_id = @company_id
+	   AND wo.profit_ctr_ID = @profit_ctr_id
+	   AND wo.trip_id = @trip_id
+	   AND pqa.status = 'I' 
  
 ------------------------------------------------ 	  
 -- Look for Missing Container Code

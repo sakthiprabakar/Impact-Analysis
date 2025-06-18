@@ -1,193 +1,186 @@
-﻿GO
-DROP PROCEDURE IF EXISTS [sp_Validate_Section_E]
+﻿USE plt_ai;
 GO
 
-CREATE PROCEDURE  [dbo].[sp_Validate_Section_E]
-		-- Add the parameters for the stored procedure here
-		@formid INT,
-		@Revision_ID INT
-	AS
+DROP PROCEDURE IF EXISTS [dbo].[sp_Validate_Section_E];
+GO
+
+CREATE PROCEDURE [dbo].[sp_Validate_Section_E]
+    @formid INT,
+    @Revision_ID INT
+AS
+BEGIN 
+
 /* ******************************************************************
+        Updated By       : Monish
+        Updated On       : 30th NOV 2022
+        Type            : Stored Procedure
+        Object Name     : [sp_Validate_Section_E]
+        Updated By      : Senthilkumar I
+        Updated On      : 28th Feb 2025
+        Ticket          : DE38160
+        Change          : texas_waste_material_type condition U to A changed
+        Procedure to validate Section E required fields and update the status of the section.
 
-		Updated By		: Monish
-		Updated On		: 30th NOV 2022
-		Type			: Stored Procedure
-		Object Name		: [sp_Validate_Section_E]
+        Inputs:    
+            @formid
+            @revision_ID
 
+        Sample Execution:
+            EXEC [sp_Validate_Section_E] @form_id, @revision_ID;
+            EXEC [sp_Validate_Section_E] 460236, 1;
+            EXEC [sp_Validate_Section_E] 579573, 1;
+            EXEC [sp_Validate_Section_E] 710450, 1;
+    ****************************************************************** */
+    DECLARE @FormStatusFlag CHAR(1) = 'Y';
 
-		Procedure to validate Section E required fields and Update the Status of section
+    -- Temporary Tables
+    SELECT 
+        form_id, revision_id, PA_residual_waste_flag, copy_source, 
+        texas_waste_material_type, RCRA_waste_code_flag, rcra_exempt_flag, 
+        rcra_exempt_reason, state_waste_code_flag, cyanide_plating, 
+        info_basis_knowledge, info_basis_analysis, info_basis_msds
+    INTO #tempFormWCR
+    FROM FormWCR 
+    WHERE form_id = @formid AND revision_id = @Revision_ID;
 
-	inputs 
-	
-		@formid
-		@revision_ID
+    SELECT 
+        form_id, revision_id, specifier, waste_code_uid, waste_code
+    INTO #tempFormXWasteCode
+    FROM FormXWasteCode  
+    WHERE form_id = @formid AND revision_id = @Revision_ID;
 
+    -- Check Pennsylvania Residual Waste
+    DECLARE @PA_residual_waste_flag_count INT, @PA_Waste_code_count INT;
+    SELECT @PA_residual_waste_flag_count = COUNT(PA_residual_waste_flag) 
+    FROM #tempFormWCR WHERE PA_residual_waste_flag = 'T';
 
+    IF (@PA_residual_waste_flag_count > 0)
+    BEGIN
+        SELECT @PA_Waste_code_count = COUNT(waste_code_uid) 
+        FROM #tempFormXWasteCode WHERE specifier = 'PA';
 
-	Samples:
-	 EXEC [sp_Validate_Section_E] @form_id,@revision_ID
-	 EXEC [sp_Validate_Section_E] 460236, 1
-	 EXEC [sp_Validate_Section_E] 579573, 1
-	 EXEC [sp_Validate_Section_E] 710450, 1
+        IF (@PA_Waste_code_count < 1)
+        BEGIN
+            SET @FormStatusFlag = 'P';
+        END
+    END
 
-****************************************************************** */
-	BEGIN
-		DECLARE @ValidColumnNullCount INTEGER;
-		DECLARE @TotalValidColumn INTEGER; -- Based SELECT Column count
-		DECLARE @SectionType VARCHAR;
-		--DECLARE @Revision_ID INTEGER;
-		DECLARE @FormStatusFlag varchar(1) = 'Y'
+    -- Texas State Waste Code Validation
+    DECLARE @Isnotamendrenewal CHAR(1), @Texascodecount INT;
+    
+    SELECT @Texascodecount = COUNT(waste_code_uid) 
+    FROM #tempFormXWasteCode WHERE specifier = 'TX';
 
+    SELECT @Isnotamendrenewal = 
+        CASE 
+            WHEN EXISTS(SELECT 1 FROM #tempFormWCR WHERE copy_source NOT IN ('amendment', 'renewal')) 
+            THEN 'T' 
+            ELSE 'F' 
+        END;
 
-		SELECT * INTO #tempFormWCR FROM FormWCR WHERE form_id=@formid and revision_id=@Revision_ID 
-		SELECT * INTO #tempFormXWasteCode FROM FormXWasteCode  WHERE form_id=@formid and revision_id=@Revision_ID 
+    IF (
+        (EXISTS (SELECT 1 FROM #tempFormWCR WHERE texas_waste_material_type IN ('I', 'N', 'A')) 
+        AND @Isnotamendrenewal = 'T' AND @Texascodecount <= 0) 
+        OR 
+        (@Texascodecount > 0 AND NOT EXISTS (SELECT 1 FROM #tempFormWCR WHERE texas_waste_material_type IN ('I', 'N', 'A')))
+    )
+    BEGIN
+        SET @FormStatusFlag = 'P';
+    END
 
+    -- RCRA Exempt Flag Validation
+    DECLARE @RCRA_waste_code_flag CHAR(1), @rcra_exempt_flag CHAR(1), @rcra_exempt_reason VARCHAR(255),@PA_residual_waste_flag char(1);
+    
+    SELECT 
+        @RCRA_waste_code_flag = RCRA_waste_code_flag,
+        @rcra_exempt_flag = rcra_exempt_flag,
+        @rcra_exempt_reason = rcra_exempt_reason,
+		@PA_residual_waste_flag = PA_residual_waste_flag 
+    FROM #tempFormWCR;
 
-		--Check the Pennsylvania Residual Waste is checked 'T' and the state code is avaialble
-		DECLARE @PA_residual_waste_flag_count INT 
-		SELECT  @PA_residual_waste_flag_count = COUNT(PA_residual_waste_flag) 
-			FROM #tempFormWCR 
-			WHERE PA_residual_waste_flag = 'T'
-		
-		IF (@PA_residual_waste_flag_count > 0)
-		BEGIN
-			DECLARE @PA_Waste_code_count INT 
-			SELECT @PA_Waste_code_count=COUNT(*) 
-			FROM #tempFormXWasteCode WHERE specifier='PA'
-			
-			IF (@PA_Waste_code_count < 1)
-			BEGIN
-				SET @FormStatusFlag = 'P'
-			END
+    IF (@RCRA_waste_code_flag = 'T')
+    BEGIN 
+        IF (@rcra_exempt_flag IS NULL OR @rcra_exempt_flag = '')
+        BEGIN
+            SET @FormStatusFlag = 'P';
+        END
+        IF (@rcra_exempt_flag = 'T' AND (@rcra_exempt_reason IS NULL OR @rcra_exempt_reason = ''))
+        BEGIN
+            SET @FormStatusFlag = 'P';
+        END
+    END
 
-		END
+    -- Pennsylvania Residual Waste Flag Check
+    IF(@PA_residual_waste_flag IS NULL OR @PA_residual_waste_flag = '')
+    BEGIN
+        SET @FormStatusFlag = 'P';
+    END
 
-		-- 1. Texas State Waste Code:
-		DECLARE @Isnotamendrenewal CHAR(1);
-		DECLARE @Texascodecount INT;
+    -- State Waste Codes Validation
+    IF (EXISTS (SELECT 1 FROM #tempFormWCR WHERE state_waste_code_flag <> 'T') 
+        AND NOT EXISTS (SELECT 1 FROM #tempFormXWasteCode WHERE specifier = 'state'))
+    BEGIN
+        SET @FormStatusFlag = 'P';
+    END
 
-		SET @Texascodecount = (SELECT COUNT(waste_code) FROM #tempFormXWasteCode WHERE  specifier = 'TX')
-		SET @Isnotamendrenewal = (SELECT
-		CASE WHEN (EXISTS(SELECT * FROM #tempFormWCR WHERE copy_source not in ('amendment','renewal')))THEN 'T' else 'F' END Isnotamendrenewal)		
-		
+    -- RCRA Waste Codes Validation
+    IF (EXISTS (SELECT 1 FROM #tempFormWCR WHERE RCRA_waste_code_flag <> 'T') 
+        AND NOT EXISTS (SELECT 1 FROM #tempFormXWasteCode WHERE specifier IN ('rcra_characteristic', 'rcra_listed')))
+    BEGIN
+        SET @FormStatusFlag = 'P';
+    END
 
-			IF((EXISTS(SELECT * FROM #tempFormWCR WHERE  texas_waste_material_type in ('I','N','U')) 
-			  AND (@Isnotamendrenewal='T' AND @Texascodecount <= 0))
-				OR
-				(@Texascodecount > 0 AND NOT EXISTS(SELECT * FROM #tempFormWCR WHERE  texas_waste_material_type in ('I','N','U'))))		
-			BEGIN
-				SET @FormStatusFlag = 'P'
-			END
+    -- Cyanide Plating Validation
+    IF (EXISTS (SELECT 1 FROM #tempFormXWasteCode WHERE waste_code_uid IN 
+                (SELECT waste_code_uid FROM WasteCode WHERE waste_code IN ('F006', 'F007', 'F008', 'F009', 'F012', 'F019'))
+                AND specifier IN ('rcra_characteristic', 'rcra_listed')))
+    BEGIN
+        IF (EXISTS (SELECT 1 FROM #tempFormWCR WHERE cyanide_plating IS NULL OR cyanide_plating = ''))
+        BEGIN
+            SET @FormStatusFlag = 'P';
+        END
+    END
 
-		
-			--Rcra Exempt flag
-			DECLARE @RCRA_waste_code_flag char(1), @PA_residual_waste_flag char(1);
-			DECLARE	@rcra_exempt_flag CHAR(1);
-			DECLARE @rcra_exempt_reason VARCHAR;
+    -- Knowledge Source Validation
+    IF (EXISTS (SELECT 1 FROM #tempFormWCR WHERE 
+                (info_basis_knowledge IS NULL OR info_basis_knowledge <> 'T') 
+                AND (info_basis_analysis IS NULL OR info_basis_analysis <> 'T') 
+                AND (info_basis_msds IS NULL OR info_basis_msds <> 'T')))
+    BEGIN
+        SET @FormStatusFlag = 'P';
+    END
 
-			SELECT @RCRA_waste_code_flag =  RCRA_waste_code_flag, 
-		       @rcra_exempt_flag = rcra_exempt_flag, 
-			   @rcra_exempt_reason = rcra_exempt_reason,
-			   @PA_residual_waste_flag = PA_residual_waste_flag FROM #tempFormWCR
+    -- Chemical Composition Validation
+     IF (EXISTS (SELECT 1 
+            FROM FormXConstituent 
+            WHERE form_id = @formid 
+              AND revision_id = @Revision_ID  
+              AND (cor_lock_flag IS NULL OR cor_lock_flag = '' OR cor_lock_flag <> 'T')
+              AND ((TCLP_or_totals IS NULL OR TCLP_or_totals = '')
+                   OR (unit IS NULL OR unit = '')
+                   OR ((min_concentration IS NULL OR max_concentration IS NULL) AND typical_concentration IS NULL)
+                   OR (max_concentration = 0 AND typical_concentration = 0)
+                   OR (min_concentration > 0 AND max_concentration IS NULL)  -- Ensure max_concentration is not NULL when min_concentration > 0
+                   OR (min_concentration > max_concentration))))
+    BEGIN   
+        SET @FormStatusFlag = 'P';
+    END
 
-			IF(ISNULL(@RCRA_waste_code_flag,'') = 'T')
-			BEGIN 
-				IF(ISNULL(@rcra_exempt_flag,'') = '')
-				BEGIN
-					SET @FormStatusFlag = 'P'
-				END
-				IF(@rcra_exempt_flag='T' and ISNULL(@rcra_exempt_reason,'')='')
-				BEGIN
-				SET @FormStatusFlag = 'P'
-				END
-			END								
+    -- Update FormSectionStatus Table
+    IF NOT EXISTS (SELECT COUNT(section) FROM FormSectionStatus WHERE FORM_ID = @formid AND revision_id = @Revision_ID AND SECTION = 'SE')
+    BEGIN
+        INSERT INTO FormSectionStatus (form_id, revision_id, section, section_status, date_created, created_by, date_modified, modified_by, isActive) 
+        VALUES (@formid, @Revision_ID, 'SE', @FormStatusFlag, GETDATE(), 1, GETDATE(), 1, 1);
+    END
+    ELSE 
+    BEGIN
+         UPDATE FormSectionStatus SET section_status = @FormStatusFlag, date_modified=GETDATE()
+        WHERE FORM_ID = @formid AND revision_id = @Revision_ID AND SECTION = 'SE';
+    END
 
-		
-		 -- Pennsylvania Residual Waste Flag:
-		 IF(ISNULL(@PA_residual_waste_flag,'')= '')
-		 BEGIN
-		    SET @FormStatusFlag = 'P'
-		 END
-
-		-- 2. State Waste Codes:
-		IF(EXISTS(SELECT * 
-					FROM #tempFormWCR 
-					WHERE  ISNULL(state_waste_code_flag,'')<>'T') 
-					AND NOT EXISTS(SELECT * 
-									FROM #tempFormXWasteCode 
-									WHERE specifier = 'state'))
-		BEGIN
-			SET @FormStatusFlag = 'P'
-		END
-
-		-- 3. RCRA Waste Codes:
-		IF(EXISTS(SELECT * 
-					FROM #tempFormWCR 
-					WHERE  ISNULL(RCRA_waste_code_flag,'')<>'T') AND 
-					NOT EXISTS(SELECT * 
-								FROM #tempFormXWasteCode 
-								WHERE (specifier = 'rcra_characteristic' or specifier = 'rcra_listed')))
-		BEGIN
-			SET @FormStatusFlag = 'P'
-		END
-
-		-- Check for 4. If F006-F009, F012, or F019, are Cyanides used in the process
-		IF(EXISTS(SELECT * 
-					FROM #tempFormXWasteCode 
-					WHERE  waste_code_uid 
-					IN(SELECT waste_code_uid 
-						FROM WasteCode 
-						WHERE waste_code IN('F006','F007','F008','F009','F012','F019')) 
-						AND (specifier = 'rcra_characteristic' OR specifier='rcra_listed')))
-		BEGIN
-		  IF(EXISTS(SELECT * FROM #tempFormWCR WHERE cyanide_plating IS NULL or cyanide_plating=''))
-		  BEGIN
-			SET @FormStatusFlag = 'P'
-		  END
-		END
-
-		-- 5. Knowledge is from
-		IF(EXISTS(SELECT * FROM #tempFormWCR WHERE 
-		(ISNULL(info_basis_knowledge, '') = '' OR  info_basis_knowledge <>'T') AND 
-		(ISNULL(info_basis_analysis, '') = '' OR info_basis_analysis <>'T') AND 
-		(ISNULL(info_basis_msds, '') = '' OR info_basis_msds <>'T')))
-		BEGIN
-			SET @FormStatusFlag = 'P'
-		END
-
-
-		-- 6. Chemical Composition		
-	
-
-		IF (EXISTS( SELECT * FROM FormXConstituent WHERE form_id=@formid AND revision_id=@Revision_ID  AND 
-		(cor_lock_flag IS NULL OR cor_lock_flag='' or cor_lock_flag!='T')
-		AND  ((TCLP_or_totals IS NULL OR TCLP_or_totals='')
-							OR (unit IS NULL OR unit='')
-							OR ((min_concentration IS NULL OR max_concentration IS NULL) AND typical_concentration IS NULL)
-							OR (max_concentration = 0 AND typical_concentration = 0)
-							OR (min_concentration > max_concentration))))
-		BEGIN	
-		
-			PRINT 'Chemical compostion failed'
-			SET @FormStatusFlag = 'P'			
-		END
-
-		-- Update the form status in FormSectionStatus table
-		IF(NOT EXISTS(SELECT * FROM FormSectionStatus WHERE FORM_ID =@formid AND SECTION ='SE'))
-		BEGIN
-			INSERT INTO FormSectionStatus 
-			VALUES (@formid,@Revision_ID,'SE',@FormStatusFlag,getdate(),1,getdate(),1,1)
-		END
-		ELSE 
-		BEGIN
-			UPDATE FormSectionStatus SET section_status = @FormStatusFlag 
-			WHERE FORM_ID = @formid AND SECTION = 'SE'
-		END
-
-		DROP TABLE #tempFormWCR 
-		DROP TABLE #tempFormXWasteCode 
-	
-END
+    DROP TABLE #tempFormWCR;
+    DROP TABLE #tempFormXWasteCode;
+END;
 GO
 
 GRANT EXEC ON [dbo].[sp_Validate_Section_E] TO COR_USER;

@@ -1,16 +1,10 @@
-﻿USE [PLT_AI]
-GO
-/*************************************************************************************************/
-DROP PROCEDURE IF EXISTS [dbo].[sp_certification_insert_update]
-GO
-CREATE PROCEDURE [dbo].[sp_certification_insert_update]
-       @Data XML,
-	   @form_id int,
-	   @revision_id int,
-	   @web_userid varchar(100)
+﻿ALTER PROCEDURE dbo.sp_certification_insert_update
+      @Data XML
+	, @form_id INTEGER
+	, @revision_id INTEGER
+	, @web_userid VARCHAR(100)
 AS
 /* ******************************************************************
-
 	Updated By		: SenthilKumar
 	Updated On		: 26th Feb 2019
 	Type			: Stored Procedure
@@ -21,6 +15,8 @@ AS
     Ticket       : 93217
     Decription   : This procedure is used to assign web_userid to created_by and modified_by columns. 
 	Procedure to insert update Cerification supplementry forms
+
+	--Updated by Blair Christensen for Titan 05/21/2025
 inputs 	
 	@Data
 	@form_id
@@ -46,65 +42,66 @@ Samples:
 <signing_name>local signing_name</signing_name>
 <signing_title>local signing_title</signing_title>
 </Certification>',427568,1
-
 ***********************************************************************/  
 BEGIN
-BEGIN TRY	
-  IF(NOT EXISTS(SELECT 1 FROM FormVSQGCESQG  WITH(NOLOCK) WHERE wcr_id = @form_id  and wcr_rev_id=  @revision_id))
-	BEGIN
-	    DECLARE @newForm_id INT 
-		DECLARE @newrev_id INT  = 1  
-		EXEC @newForm_id = sp_sequence_next 'form.form_id'
-		INSERT INTO FormVSQGCESQG(
-			form_id,
-			revision_id,
-			wcr_id,
-			wcr_rev_id,
-			locked,
-			vsqg_cesqg_accept_flag,
-			created_by,
-			date_created,
-			date_modified,
-			modified_by
-			)
-        SELECT
-			 
-		    form_id=@newForm_id,
-		    revision_id=@newrev_id,
-		    wcr_id= @form_id,
-			wcr_rev_id=@revision_id,
-			--locked = p.v.value('locked[1]','char(1)'),
-			locked = 'U',
-			vsqg_cesqg_accept_flag = p.v.value('vsqg_cesqg_accept_flag[1]','char(1)'),			
-		    created_by = @web_userid,
-		    date_created = GETDATE(),
-		    date_modified = GETDATE(),
-			modified_by = @web_userid
-        FROM
-            @Data.nodes('Certification')p(v)
-   END
-	ELSE
-	BEGIN
-        UPDATE  FormVSQGCESQG
-        SET                 
-			--locked = p.v.value('locked[1]','char(1)'),
-			locked = 'U',
-			vsqg_cesqg_accept_flag = p.v.value('vsqg_cesqg_accept_flag[1]','char(1)'),
-		    date_modified = GETDATE(),
-		    modified_by = @web_userid
-		 FROM
-         @Data.nodes('Certification')p(v) WHERE wcr_id = @form_id and wcr_rev_id=@revision_id
-	END
-END TRY
-BEGIN CATCH 			
-		DECLARE @error_description VARCHAR(4000)
-		declare @mailTrack_userid nvarchar(60) = 'COR'
-		set @error_description=' ErrorMessage: '+Error_Message()
-		INSERT INTO COR_DB.[dbo].[ErrorLogs] (ErrorDescription,[Object_Name],Web_user_id,CreatedDate)
-							VALUES(@error_description,ERROR_PROCEDURE(),@mailTrack_userid,GETDATE())
-END CATCH
+	BEGIN TRY	
+		IF NOT EXISTS (SELECT 1 FROM dbo.FormVSQGCESQG WHERE wcr_id = @form_id and wcr_rev_id = @revision_id)
+			BEGIN
+				DECLARE @newForm_id INTEGER
+					  , @newrev_id INTEGER = 1
+					  , @FormWCR_uid INTEGER;
+
+				EXEC @newForm_id = sp_sequence_next 'form.form_id';
+
+				IF EXISTS (SELECT 1 FROM dbo.FormWCR WHERE form_id = @form_id AND revision_id = @revision_id)
+					BEGIN
+						SELECT @FormWCR_uid = formWCR_uid
+						  FROM dbo.FormWCR
+						 WHERE form_id = @form_id
+						   AND revision_id = @revision_id;
+					END
+				ELSE
+					BEGIN
+						SET @FormWCR_uid = NULL;
+					END
+
+				INSERT INTO dbo.FormVSQGCESQG(form_id, revision_id, formWCR_uid
+					 , wcr_id, wcr_rev_id, locked
+					 , vsqg_cesqg_accept_flag
+					 , created_by, date_created, modified_by, date_modified
+					 --, printname, company, title
+					 )
+				SELECT @newForm_id as form_id, @newrev_id as revision_id, @FormWCR_uid as formWCR_uid
+					 , @form_id as wcr_id, @revision_id as wcr_rev_id, 'U' as locked
+					 , p.v.value('vsqg_cesqg_accept_flag[1]', 'CHAR(1)') as vsqg_cesqg_accept_flag
+					 , created_by = @web_userid, date_created = GETDATE()
+					 , modified_by = @web_userid, date_modified = GETDATE()
+				  FROM @Data.nodes('Certification')p(v);
+			END
+		ELSE
+			BEGIN
+				UPDATE dbo.FormVSQGCESQG
+				   SET locked = 'U'
+				     , vsqg_cesqg_accept_flag = p.v.value('vsqg_cesqg_accept_flag[1]', 'CHAR(1)')
+					 , date_modified = GETDATE()
+					 , modified_by = @web_userid
+				  FROM @Data.nodes('Certification')p(v)
+				 WHERE wcr_id = @form_id
+				   AND wcr_rev_id = @revision_id;
+			END
+	END TRY
+
+	BEGIN CATCH 			
+		DECLARE @error_description VARCHAR(2047)
+			  , @mailTrack_userid VARCHAR(60) = 'COR'
+
+		SET @error_description = ' ErrorMessage: ' + Error_Message()
+
+		INSERT INTO COR_DB.dbo.ErrorLogs (ErrorDescription, [Object_Name], Web_user_id, CreatedDate)
+		VALUES(@error_description, ERROR_PROCEDURE(), @mailTrack_userid, GETDATE());
+	END CATCH
 END
 GO
-	GRANT EXEC ON [dbo].[sp_certification_insert_update] TO COR_USER;
+
+GRANT EXEC ON [dbo].[sp_certification_insert_update] TO COR_USER;
 GO
-/****************************************************************************************************************/

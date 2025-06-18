@@ -1,13 +1,15 @@
+--DE37952,US141452
+
 USE [PLT_AI]
 GO
-/****** Object:  StoredProcedure [dbo].[sp_sfdc_Jobbillingproject_Insert]    Script Date: 12/17/2024 9:43:03 AM ******/
+/****** Object:  StoredProcedure [dbo].[sp_sfdc_Jobbillingproject_Insert]    Script Date: 3/21/2025 4:39:07 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 
 
-ALTER PROCEDURE [dbo].[sp_sfdc_Jobbillingproject_Insert] 
+CREATE OR ALTER     PROCEDURE [dbo].[sp_sfdc_Jobbillingproject_Insert] 
 						@break_code_1 char(1),
 						@break_code_2 char(1),
 						@break_code_3 char(1),
@@ -54,6 +56,7 @@ ALTER PROCEDURE [dbo].[sp_sfdc_Jobbillingproject_Insert]
 						@profit_ctr_id int= Null,
 						@role varchar(80)=Null,
 						@salesforce_so_quote_id varchar(15)=Null,
+						@salesforce_contact_CSID varchar(18)=NULL,
 						@response varchar(4000) OUTPUT
 
 /*
@@ -94,6 +97,9 @@ US#120475  -- 07/24/2024 Handled the empty string during comparision
 US#124941 EQAI - Venu & Nagaraj M Job Level Billing Project - Use Values FROM EQAI Standard Billing Project
 US#US131008  Added by Venu Update Job Level Billing Project evaluation criteria - remove break code logic
 Rally#US134134  -- Defaulting to zero billing project id for the customerbillingeirrate.
+Rally#US141970 -- Defaulting to zero billing project id for the customerbillingfrrate, and PO_validation,customer_service_id,release_required_flag,release_validation,link_required_validation
+DE37952 -- Added default_po_required_flag in where clause condition for checking the billing projects already exists or not.
+US141452 -- Added salesforce_contact_Csid as primary contact for searching contact id.
 
 USE PLT_AI
 GO
@@ -262,7 +268,11 @@ BEGIN
 	@default_pickup_report_flag char(1)=Null, 
 	@default_whca_exempt char(1)=Null,  
 	@default_NAM_ID int=Null, 
-	@default_NAS_ID int=Null
+	@default_NAS_ID int=Null,
+	@po_validation char(1)=NULL,
+	@release_validation char(1)=NULL,
+	@link_required_validation char(1)=NULL
+
 	--Copying standard billing project values -- End
 
 
@@ -421,7 +431,8 @@ BEGIN
 						' company_id;' + isnull(STR(@company_id  ), '') + 
 						' profit_ctr_id;' + isnull(STR(@profit_ctr_id),'') +
 						' Role;' +isnull(@role,'')  +
-						' salesforce_so_quote_id;' +isnull(@salesforce_so_quote_id,'')
+						' salesforce_so_quote_id;' +isnull(@salesforce_so_quote_id,'') +
+						' salesforce_contact_CSID;' +isnull(@salesforce_contact_CSID,'')
 
 	 Set @response = 'Integration Successful'
 	
@@ -462,7 +473,24 @@ BEGIN
 		 Drop table #temp_salesforce_validation_fields
 
 
+		 select @ll_count_rec=count(*) from ContactXRef where salesforce_contact_CSID=@salesforce_contact_CSID and customer_id=@customer_id and status ='A'
+		 
 
+		 IF @ll_count_rec=1
+		 BEGIN
+		 SELECT @contact_id=contact_id from ContactXRef 
+										where salesforce_contact_CSID=@salesforce_contact_CSID 
+										AND customer_id =@customer_id
+										AND status ='A'
+		
+		 END
+
+			
+		 
+
+		 IF @ll_count_rec =0
+	 BEGIN
+		 
 		 select @ll_count_rec=count(*) from contact where email=@cusbilxcontact_email and contact_status='A'
 
 		if @ll_count_rec = 0  
@@ -481,11 +509,11 @@ BEGIN
 		end
 
 		if @ll_count_rec = 1
-		Begin
+			Begin
 			SELECT @contact_id=contact_id from contact 
 										where email=@cusbilxcontact_email and contact_status='A'
 
-		END
+			END
 		If @ll_count_rec > 1  
 		BEGIN
 		
@@ -550,6 +578,7 @@ BEGIN
 				Set @flag='E' 
 			End
 		end
+	END
 
 		
 			if @ll_count_rec = 1
@@ -578,6 +607,12 @@ BEGIN
 
 		/*Comparison of Standard billing project validation starts*/
 		Begin
+
+		if @PO_required_flag ='' or @PO_required_flag is null and @ls_config_value_phase3='T'
+		BEGIN
+			select @default_PO_required_flag=PO_required_flag from customerbilling where customer_id=@customer_id and billing_project_id=0
+		END
+		
 		select @ll_standard_billing_cnt=count(*) from customerbilling
 									  INNER JOIN CustomerBillingXContact ON CustomerBillingXContact.contact_id=@contact_id and
 																			CustomerBillingXContact.customer_id=customerbilling.customer_id 
@@ -593,7 +628,8 @@ BEGIN
 									  --and Coalesce(break_code_1,'')=Coalesce(@break_code_1,'')
 									 -- and Coalesce(break_code_2,'')=Coalesce(@break_code_2,'')
 									  --and Coalesce(break_code_3,'')=Coalesce(@break_code_3,'')
-									  and isnull(PO_required_flag,'')=isnull(@PO_required_flag,'')
+									  --and isnull(PO_required_flag,'')=isnull(@PO_required_flag,'')
+									  and isnull(PO_required_flag,'')=isnull(@PO_required_flag,@default_PO_required_flag)
 									  and (customerbilling.salesforce_so_quote_id=@salesforce_so_quote_id or isnull(customerbilling.salesforce_so_quote_id,'')='')
 
         
@@ -633,7 +669,8 @@ BEGIN
 									  --and Coalesce(break_code_1,'')=Coalesce(@break_code_1,'')
 									  --and Coalesce(break_code_2,'')=Coalesce(@break_code_2,'')
 									 --and Coalesce(break_code_3,'')=Coalesce(@break_code_3,'')
-									  and isnull(PO_required_flag,'')=isnull(@PO_required_flag,'')
+									  --and isnull(PO_required_flag,'')=isnull(@PO_required_flag,'')
+									  and isnull(PO_required_flag,'')=isnull(@PO_required_flag,@default_PO_required_flag)
 									  and (customerbilling.salesforce_so_quote_id=@salesforce_so_quote_id or isnull(customerbilling.salesforce_so_quote_id,'')='')
 
              Update WorkorderHeader set billing_project_id=@billing_project_id Where workorder_id in
@@ -700,7 +737,7 @@ BEGIN
 
 			EXECUTE @billing_project_id = sp_sequence_next 'CustomerBilling.Billing_Project_ID'	
 
-			Select @CUST_service_user_code=user_code,@Customer_service_ID=type_id
+			Select @CUST_service_user_code=user_code--,@Customer_service_ID=type_id
 			from UsersXEQContact
 			where user_code in (select user_code from users where employee_id = @RSG_EIN)
 			
@@ -718,13 +755,18 @@ BEGIN
 					@default_link_required_flag=link_required_flag,
 					@default_pickup_report_flag=pickup_report_flag,
 					@default_whca_exempt=whca_exempt,
-					@default_PO_required_flag=PO_required_flag,
+					--@default_PO_required_flag=PO_required_flag,
 					@default_collections_id=collections_id,
 					@default_NAM_ID=NAM_ID,
 					@default_NAS_ID=NAS_ID,
 					@default_all_facilities_flag=all_facilities_flag,
 					@default_print_wos_with_start_date_flag=print_wos_with_start_date_flag,
-					@default_insurance_surcharge_flag=insurance_surcharge_flag
+					@default_insurance_surcharge_flag=insurance_surcharge_flag,
+					@po_validation=po_validation,
+					@customer_service_id=customer_service_id,
+					@release_required_flag=release_required_flag,
+					@release_validation=release_validation,
+					@link_required_validation=link_required_validation 
 					from CustomerBilling
 					where customer_id=@customer_id
 					and billing_project_id=0
@@ -745,6 +787,8 @@ BEGIN
 
 					drop table #temp_CustomerBillingeManifestFee
 				End
+
+				
 
 				Insert into customerbilling
 					(mail_to_bill_to_address_flag,
@@ -805,7 +849,10 @@ BEGIN
 					salesforce_so_quote_id,
 					NAM_ID,
 					NAS_id,
-					collections_id
+					collections_id,
+					release_required_flag,
+					release_validation,
+					link_required_validation
 					)
 					select
 					@mail_to_bill_to_address_flag,
@@ -839,10 +886,11 @@ BEGIN
 					case when (@invoice_comment_5 is null or @invoice_comment_5='') then @default_invoice_comment_5
 					else @invoice_comment_5 end,
 					@Customer_service_ID,
-					case when @PO_required_flag='T' THEN 'E'
+					/*case when @PO_required_flag='T' THEN 'E'
 					WHEN @PO_required_flag='F' THEN 'W'
 					ELSE NULL 
-					END,
+					END,*/
+					@po_validation,
 					@eq_approved_offeror_desc,
 					@eq_approved_offeror_flag,
 					@eq_offeror_bp_override_flag,
@@ -882,7 +930,12 @@ BEGIN
 					@salesforce_so_quote_id,
 					@default_NAM_ID,
 					@default_NAS_ID,
-					@default_collections_id
+					@default_collections_id,
+					@release_required_flag,
+					@release_validation,
+					@link_required_validation
+					
+					
 			
 			        
 					if @@error <> 0
@@ -990,6 +1043,35 @@ BEGIN
    					@user_code
 					return -1
 				End
+
+
+
+
+				
+				INSERT INTO CUSTOMERbillingFRFRATE
+				(customer_id,billing_project_id,date_effective,apply_fee_flag,exemption_approved_by,exemption_reason_uid,date_exempted,added_by,date_added,modified_by,date_modified)
+				select @customer_id,@billing_project_id,date_effective,apply_fee_flag,exemption_approved_by,exemption_reason_uid,date_exempted,@user_code,GETDATE(),@user_code,GETDATE()
+				FROM CUSTOMERbillingFRFRATE
+				WHERE CUSTOMER_ID=@CUSTOMER_ID
+				AND BILLING_PROJECT_ID=0
+
+
+				if @@error <> 0
+				Begin
+					Rollback transaction
+					SELECT @Response = 'Error: Integration failed due to the following reason; Error inserting CustomerBillingFRFRRate table; '+ isnull(ERROR_MESSAGE(),' ')
+					INSERT INTO PLT_AI_AUDIT..Source_Error_Log
+					(Input_Params,source_system_details,action,Error_description,log_date,Added_by)
+   					SELECT
+   					@key_value,
+   					@source_system,
+    					'Insert',
+    					@Response,
+    					GETDATE(),
+   					@user_code
+					return -1
+				End
+
 			
 			Declare sf_billingdocument CURSOR fast_forward for
 			Select eqai_scan_type_id_validate,validation,print_on_invoice_required_flag,category,sf_document_name_label,eqai_scan_document_type from sfdc_workorder_documenttype_translate  
@@ -1270,7 +1352,7 @@ End
 			@default_link_required_flag ,@retail_flag ,@sort_code_1 ,@sort_code_2 ,@sort_code_3 ,@submit_on_hold_flag ,@trip_stop_rate_default_flag ,@weight_ticket_required_flag ,
 			@default_whca_exempt ,@default_pickup_report_flag ,@invoice_copy_flag ,@intervention_required_flag ,@print_wos_in_inv_attachment_flag ,@contact_id,
 			@CUST_service_user_code,@Customer_service_ID,@category ,@type_id,@print_on_invoice_required_flag ,@print_toc_in_inv_attachment_flag ,@print_rws_in_inv_attachment_flag ,
-			@cbilling_territory_code,@salesforce_so_quote_id
+			@cbilling_territory_code,@salesforce_so_quote_id,@release_validation,@link_required_validation,@po_validation
 		
 			
 			IF @ll_ret <> 0
@@ -1307,7 +1389,10 @@ If @ls_config_value='F'
 END
 
 
+
 GO
+
+
 
 GRANT EXECUTE ON OBJECT::[dbo].[sp_sfdc_Jobbillingproject_Insert] TO EQAI  
 

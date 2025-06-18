@@ -1,7 +1,4 @@
-﻿DROP PROCEDURE IF EXISTS sp_rpt_air_emissions_const_worksheet
-GO
-
-CREATE PROCEDURE sp_rpt_air_emissions_const_worksheet
+﻿CREATE OR ALTER PROCEDURE sp_rpt_air_emissions_const_worksheet
 	@company_id			int
 ,	@profit_ctr_id		int
 ,	@date_from			datetime
@@ -23,6 +20,7 @@ PB Object(s): r_air_emissions_const_worksheet_report
 				If the 'Typical' value is null and the 'Min' value is null and 'Max' is not null, then use the 'Max' value for reporting purposes.
 				If the 'Typical' value is null, and the 'Min' is not null and the 'Max' is not null, then use mid-point of 'Min' and 'Max' values for reporting purposes.
 				If the 'Typical' value is null, and the 'Max' value is null, but the 'Min' value is not null, then use the 'Min' value for reporting purposes.
+05/29/2025 KS - Rally US116196 - Constituent - Integer data type preventing CAS # entry
 
 NOTE: This is copied from sp_rpt_hap_const_received.
  
@@ -36,7 +34,8 @@ SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
 
 DECLARE @debug int,
 		@pound_ton_conversion float
-				
+
+DROP TABLE IF EXISTS #tri_work_table;				
 CREATE TABLE #tri_work_table ( 
 	company_id				int			null
 ,	profit_ctr_id			int			null
@@ -51,7 +50,7 @@ CREATE TABLE #tri_work_table (
 ,	unit					varchar(10) null
 ,	density					float		null
 ,	const_id				int			null
-,	cas_code				int			null
+,	cas_code				bigint		null
 ,	const_desc				varchar(50) null
 ,	hap						char(1)		null
 ,	VOC						char(1)		null
@@ -122,7 +121,49 @@ SET @pound_ton_conversion = 0.0005	--  1 / 2000 = 0.0005
 	insert into #tri_work_table.
 */
 
-INSERT #tri_work_table
+INSERT INTO #tri_work_table
+	(company_id,
+	profit_ctr_id,
+	receipt_id,
+	line_id,
+	bulk_flag,
+	container_id,
+	treatment_id,
+	treatment_desc,
+	approval_code,
+	concentration,
+	unit,
+	density,
+	const_id,
+	cas_code,
+	const_desc,
+	hap,
+	VOC,
+	quantity,
+	bill_unit_code,
+	container_size,
+	pound_conv,
+	container_count,
+	pounds_received,
+	consistency,
+	c_density,
+	pounds_constituent,
+	ppm_concentration,
+	location,
+	waste_type_code,
+	location_report_flag,
+	reportable_category,
+	reportable_category_desc,
+	generator_name,
+	process_location,
+	location_type,
+	emission_factor,
+	control_efficiency_value,
+	pounds_emission,
+	disposal_date,
+	tracking_num,
+	air_permit_restricted,
+	sequence_id)
 SELECT
 	Receipt.company_id,	
 	Container.profit_ctr_id,
@@ -769,10 +810,8 @@ GROUP BY
 	tracking_num,
 	air_permit_restricted
 ORDER BY const_id, CAS_code, treatment_id, approval_code, process_location
-
-
 GO
+
 GRANT EXECUTE
     ON OBJECT::[dbo].[sp_rpt_air_emissions_const_worksheet] TO [EQAI];
-
-
+GO

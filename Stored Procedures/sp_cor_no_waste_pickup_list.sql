@@ -30,6 +30,7 @@ History:
 					using optional input parameter @generator_id_list.
 	02/22/2021	JPB	DO-16076: Added workorder_type, workorder_sub_type and billing_project_name to output
 	12/15/2021  JPB DO-29401: created as [sp_cor_no_waste_pickup_list]
+	06/17/2025  PP  US156809: Adds customer_id and cust_name to the end of the output columns.
 
 Sample:
 
@@ -285,11 +286,15 @@ select distinct
 	, x.company_id
 	, x.profit_ctr_id
 	, x.workorder_id
+	, w.customer_id
+	, cust.cust_name
 from @foo x
 inner join workorderheader w (nolock)
 	on x.workorder_id = w.workorder_id
 	and x.company_id = w.company_id
 	and x.profit_ctr_id = w.profit_ctr_id
+inner join customer cust (nolock)
+        on w.customer_id = cust.customer_id
 inner join generator g (nolock)
 	on w.generator_id = g.generator_id
 left outer join WorkOrderStop wos (nolock)

@@ -16,20 +16,16 @@ AS
 
 /* ******************************************************************
 
-	Updated By		: Mubarak
-	Updated On		: 24th May 2022
-	Type			: Stored Procedure
-	Object Name		: [sp_Validate_Profile_Section_H]
+	 Updated By			: Divya Bharathi R  
+	 Updated On			: 25th Feb 2025 
+	 Type				: Stored Procedure  
+	 Object Name		: [sp_Validate_Profile_Section_H]
+	 Last Change		: Removed the validation for wcr_sign_name & wcr_sign_company
+	 Reference Ticket	: DE37954: UAT Bug: Express Renewal > Express Renewal Window is Not Retrieving Valid Candidates for Renewal
+	 Purpose			: Procedure to validate Section H required fields and Update the Status of section
 
-
-	Procedure to validate Section H required fields and Update the Status of section
-
-inputs 
-	
+Inputs 	
 	@profile_id
-	
-
-
 
 Samples:
  EXEC [sp_Validate_Profile_Section_H] @profile_id
@@ -87,10 +83,10 @@ BEGIN
 	END
 	--OR ISNULL(signing_date,'') ='')
 	-- 5. Knowledge is from
-		IF((ISNULL(@signing_name,'') ='' OR ISNULL(@signing_company,'') = '' OR ISNULL(@signing_title,'') =''))--ISNULL(wcr_signing_title,'') ='' OR )
-	BEGIN
-		SET @ProfileStatusFlag = 'P'
-	END
+	--	IF((ISNULL(@signing_name,'') ='' OR ISNULL(@signing_company,'') = '' OR ISNULL(@signing_title,'') =''))--ISNULL(wcr_signing_title,'') ='' OR )
+	--BEGIN
+	--	SET @ProfileStatusFlag = 'P'
+	--END
 	--IF(EXISTS(SELECT * FROM #tempProfile WHERE ISNULL(wcr_sign_name,'') ='' OR ISNULL(wcr_sign_company,'') =''))--ISNULL(wcr_signing_title,'') ='' OR )
 	--BEGIN
 	--	SET @ProfileStatusFlag = 'P'

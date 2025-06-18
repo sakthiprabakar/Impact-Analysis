@@ -1,4 +1,4 @@
-﻿CREATE PROCEDURE sp_rpt_hap_by_const
+﻿CREATE OR ALTER PROCEDURE sp_rpt_hap_by_const
 	@company_id			int
 ,	@profit_ctr_id		int
 ,	@date_from			datetime
@@ -21,12 +21,14 @@ however this report only has a report type 1 (worksheet) and contains more infor
 08/21/2013 SM	Added wastecode table and displaying Display name
 03/11/2022 AM DevOps:17098 - Added 'ug/kg', 'ppb' and 'ug/L' calculation
 07/06/2023 Nagaraj M Devops #67290 - Modified the ug/kg, ppb calculation from /0.0001 to * 0.000000001, and ug/L calculation from "0.001" to "* 8.3453 * 0.000000001"
+05/29/2025 KS - Rally US116196 - Constituent - Integer data type preventing CAS # entry
 sp_rpt_hap_by_const 2, 21, '01/01/2008', '03/31/2008', 'ALL' , -99, 11
 ***********************************************************************/
 SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
 
 DECLARE @debug int
 
+DROP TABLE IF EXISTS #tri_work_table;
 CREATE TABLE #tri_work_table ( 
 	company_id				int			null
 ,	profit_ctr_id			int			null
@@ -40,7 +42,7 @@ CREATE TABLE #tri_work_table (
 ,	concentration			float		null
 ,	unit					varchar(10) null
 ,	density					float		null
-,	const_id				int			null
+,	const_id				bigint		null
 ,	cas_code				int			null
 ,	const_desc				varchar(50) null
 ,	quantity				float		null
@@ -69,7 +71,41 @@ SET @debug = 0
 IF @treatment_id = -99 SET @treatment_id = NULL
 IF @treatment_category = -99 SET @treatment_category = NULL
 
-INSERT #tri_work_table
+INSERT INTO #tri_work_table
+	(company_id,
+	profit_ctr_id,
+	receipt_id,
+	line_id,
+	bulk_flag,
+	container_id,
+	treatment_id,
+	treatment_desc,
+	approval_code,
+	concentration,
+	unit,
+	density,
+	const_id,
+	cas_code,
+	const_desc,
+	quantity,
+	bill_unit_code,
+	container_size,
+	pound_conv,
+	container_count,
+	pounds_received,
+	consistency,
+	c_density,
+	pounds_constituent,
+	ppm_concentration,
+	location,
+	waste_type_code,
+	location_report_flag,
+	reportable_category,
+	reportable_category_desc,
+	generator_name,
+	process_location,
+	emission_factor,
+	pounds_emission)
 SELECT
 	Receipt.company_id,	
 	Container.profit_ctr_id,
@@ -614,10 +650,9 @@ GROUP BY
     process_location,
     emission_factor		
 ORDER BY const_id, CAS_code, treatment_id, approval_code, process_location
-
-
 GO
+
 GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_rpt_hap_by_const] TO [EQAI]
-    AS [dbo];
+    ON OBJECT::[dbo].[sp_rpt_hap_by_const] TO [EQAI];
+GO
 

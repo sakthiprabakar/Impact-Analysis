@@ -14,14 +14,14 @@ AS
 
 	
 /* ****************************************************************
-		Updated By		: Pasupathi
-		Updated On		: 30th Aug 2024
-		Type			: Stored Procedure
-		Object Name		: [sp_Cor_Bulkrenew_Profile_List]
-
-		exec sp_Cor_Bulkrenew_Profile_List 
-
-		select * from BulkRenewProfile
+		
+		Updated By			: Divya Bharathi R  
+		Updated On			: 4th Mar 2025 
+		Type				: Stored Procedure   
+		Object Name			: [sp_Cor_Bulkrenew_Profile_List]  
+		Last Change			: Altered the condition in ProfileQuoteApproval to exclude MDI Facility
+		Ticket Reference	: DE37954- UAT Bug: Express Renewal > Express Renewal Window is Not Retrieving Valid Candidates for Renewal
+		Execution Statement	: exec sp_Cor_Bulkrenew_Profile_List 100, 'all_customers'
 
 *******************************************************************/
 
@@ -113,9 +113,12 @@ from (
 	and p.curr_status_code = 'A'
 	and p.inactive_flag <> 'T'
 	and p.ap_expiration_date > dateadd(yyyy, -2, getdate())
-	and NOT EXISTS (select TOP 1 quote_id from ProfileQuoteApproval pqa where pqa.profile_id = p.profile_id 
-	and pqa.status='A' and pqa.company_id = 22 and pqa.profit_ctr_id = 0
+	and NOT EXISTS (select TOP 1 quote_id from ProfileQuoteApproval pqa where pqa.profile_id = p.profile_id     
+	and pqa.status='A' and pqa.company_id = 2 and pqa.profit_ctr_id = 0    
 	)
+	--and NOT EXISTS (select TOP 1 quote_id from ProfileQuoteApproval pqa where pqa.profile_id = p.profile_id 
+	--and pqa.status='A' and pqa.company_id = 22 and pqa.profit_ctr_id = 0
+	--)
  
     and 1 = 
 		case 

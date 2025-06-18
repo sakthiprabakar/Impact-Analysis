@@ -1,7 +1,4 @@
-﻿DROP PROCEDURE IF EXISTS sp_rpt_hap_worksheet
-GO
-
-CREATE PROCEDURE sp_rpt_hap_worksheet
+﻿CREATE OR ALTER PROCEDURE sp_rpt_hap_worksheet
 	@company_id			int
 ,	@profit_ctr_id		int
 ,	@date_from			datetime
@@ -36,6 +33,7 @@ however this report only has a report type 1 (worksheet) and contains more infor
 				If the 'Typical' value is null and the 'Min' value is null and 'Max' is not null, then use the 'Max' value for reporting purposes.
 				If the 'Typical' value is null, and the 'Min' is not null and the 'Max' is not null, then use mid-point of 'Min' and 'Max' values for reporting purposes.		
 				If the 'Typical' value is null, and the 'Max' value is null, but the 'Min' value is not null, then use the 'Min' value for reporting purposes.
+05/29/2025 KS - Rally US116196 - Constituent - Integer data type preventing CAS # entry
 sp_rpt_hap_worksheet 21, 0, '07/01/2020', '07/31/2020', 'ALL' , -99, -99
 ***********************************************************************/
 SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
@@ -46,7 +44,8 @@ DECLARE @debug int,
 		@date_from_total	datetime,
 		@pound_ton_conversion float,
 		@date_original	datetime
-		
+
+DROP TABLE IF EXISTS #tri_work_table;		
 CREATE TABLE #tri_work_table ( 
 	company_id				int			null
 ,	profit_ctr_id			int			null
@@ -61,7 +60,7 @@ CREATE TABLE #tri_work_table (
 ,	unit					varchar(10) null
 ,	density					float		null
 ,	const_id				int			null
-,	cas_code				int			null
+,	cas_code				bigint		null
 ,	const_desc				varchar(50) null
 ,	quantity				float		null
 ,	bill_unit_code			varchar(4)	null
@@ -164,13 +163,62 @@ DECLARE @ContainerDestination TABLE (
 ,	INDEX idx_tmp_company_id_profit_ctr_id_location NONCLUSTERED(company_id, profit_ctr_id, location));
 
 INSERT INTO @ContainerDestination
+	(company_id, profit_ctr_id, receipt_id, line_id, container_id, treatment_id, location, disposal_date, sequence_id, container_percent)
 SELECT	company_id, profit_ctr_id, receipt_id, line_id, container_id, treatment_id, location, disposal_date, sequence_id, container_percent  
 FROM	ContainerDestination
  WHERE	company_id = @company_id  
  AND	profit_ctr_id = @profit_ctr_id  
  AND	disposal_date BETWEEN @date_original  AND @date_to
 
-INSERT #tri_work_table  
+INSERT INTO #tri_work_table  
+	(company_id,
+	profit_ctr_id,
+	receipt_id,
+	line_id,
+	bulk_flag,
+	container_id,
+	treatment_id,
+	treatment_desc,
+	approval_code,
+	concentration,
+	unit,
+	density,
+	const_id,
+	cas_code,
+	const_desc,
+	quantity,
+	bill_unit_code,
+	container_size,
+	pound_conv,
+	container_count,
+	pounds_received,
+	consistency,
+	c_density,
+	pounds_constituent,
+	ppm_concentration,
+	location,
+	waste_type_code,
+	location_report_flag,
+	reportable_category,
+	reportable_category_desc,
+	generator_name,
+	process_location,
+	emission_factor,
+	control_efficiency_value,
+	pounds_emission,
+	disposal_date,
+	rolling_pounds,
+	rolling_tons,
+	rolling_pounds_emission,
+	rolling_tons_emission,
+	rolling_total_pounds,
+	rolling_total_tons,
+	rolling_total_em_pounds,
+	rolling_total_em_tons,
+	sequence_id,
+	company_name,
+	profit_ctr_name
+	)
 SELECT  
  Receipt.company_id,   
  Container.profit_ctr_id,  
@@ -897,10 +945,9 @@ GROUP BY
  rolling_total_em_pounds,  
  rolling_total_em_tons  
 ORDER BY const_id, CAS_code, treatment_id, approval_code, process_location
-
-
 GO
+
 GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_rpt_hap_worksheet] TO [EQAI]
-    AS [dbo];
+    ON OBJECT::[dbo].[sp_rpt_hap_worksheet] TO [EQAI];
+GO
 

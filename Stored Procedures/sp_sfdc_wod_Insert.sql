@@ -1,13 +1,13 @@
 USE [PLT_AI]
 GO
-/****** Object:  StoredProcedure [dbo].[sp_sfdc_wod_Insert]    Script Date: 1/24/2025 8:47:35 PM ******/
+/****** Object:  StoredProcedure [dbo].[sp_sfdc_wod_Insert]    Script Date: 5/7/2025 7:39:42 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER OFF
 GO
 
 
-ALTER PROCEDURE [dbo].[sp_sfdc_wod_Insert] @response varchar(4000) OUTPUT  
+CREATE OR ALTER       PROCEDURE [dbo].[sp_sfdc_wod_Insert] @response varchar(4000) OUTPUT  
 AS  
   
 /*    
@@ -25,7 +25,8 @@ Rally # US126965 / TA492085 -- Modified the manifest_handling_code, ERG_NUMBER, 
 Rally # US136383  - Modified the bill_rate logic
 Rally # US135227 -- updation of user_code as Tracking_contact for existing workordertracking row.
 Rally # US138836 -- Added bill_rate parameter in the sp_sfdc_wod_Insert_disposal stored procedure call.
-
+Rally# DE38851 -- Added (@manifest) in the where clause in the workorderdetailunit select query and declared onetime @manifest=trim(manifest)
+US#151982  - 04/29/2025 Removed company condition to derive cost qty
 */  
   
 DECLARE     
@@ -133,7 +134,8 @@ DECLARE
 Set @response = 'WorkorderDetail Integration Successful'  
   
 Select @det_count = count(*) from #sf_detail  
-  
+
+
 Begin Try  
 Declare wod_line CURSOR fast_forward for  
           Select  
@@ -247,7 +249,9 @@ BEGIN
   End  
   
  --Check if Disposal request id for different workorder  
-  
+
+set @manifest=trim(@manifest)
+
  If @workorder_id_sf_send is not null and @as_woh_disposal_flag='T'  
  Begin  
    Select @ll_wo_cnt=count(*) from workorderheader with(nolock) where workorder_ID=@workorder_id_sf_send and company_id=@company_id and profit_ctr_ID=@profit_ctr_id and workorder_status = 'N'  
@@ -291,9 +295,9 @@ BEGIN
                and bill_unit_code = @bill_unit_code  
   End  
   
-  IF (@resource_type ='L' OR @resource_type ='E') and (@company_id=72 or @company_id=71 or @company_id=63 or @company_id=64)  
+  IF (@resource_type ='L' OR @resource_type ='E') /*and (@company_id=72 or @company_id=71 or @company_id=63 or @company_id=64)  */ --Commented for US#151982
   Begin  
-  Set @cost_quantity= cast(@extEnded_cost as float) / cast (@cost as float)  
+   Set @cost_quantity= cast(@extEnded_cost as float) / cast (@cost as float)
   End  
   
   Select @newsequence_id =  isnull(max(sequence_id),0) + 1  from WorkOrderdetail with(nolock) where workorder_id=@workorder_ID_ret   
@@ -410,7 +414,7 @@ BEGIN
  Begin  
  Select @ll_cnt_manifest=COUNT(*) FROM  WorkorderManifest with(nolock) WHERE  
                 WORKORDER_ID=@workorder_id_ret  
-                AND MANIFEST=TRIM(@MANIFEST)  
+                AND MANIFEST=@MANIFEST
                 and company_id=@company_id  
                 and profit_ctr_ID=@profit_ctr_ID    
   
@@ -427,13 +431,14 @@ BEGIN
          and wd.company_id=wdu.company_id  
          and wd.profit_ctr_ID=wdu.profit_ctr_ID  
          and wd.sequence_id=wdu.sequence_id   
+		 and wd.manifest=@manifest --Venu
   
          Select @ll_cnt_wod=count(*) from WorkorderDetail with(nolock)                                
          Where profile_id=@profile_id  
          and workorder_ID=@workorder_id_ret  
          and company_id=@company_id           
          and profit_ctr_ID=@profit_ctr_ID  
-         and MANIFEST=TRIM(@MANIFEST)  
+         and MANIFEST=@MANIFEST  
                
   
     If @ll_cnt_wod > 0  
@@ -443,7 +448,7 @@ BEGIN
                                   and workorder_ID=@workorder_id_ret  
                                   and company_id=@company_id           
                                   and profit_ctr_ID=@profit_ctr_ID  
-                                  and MANIFEST=TRIM(@MANIFEST)               
+                                  and MANIFEST=@MANIFEST
     End   
         
         End    
@@ -462,13 +467,14 @@ BEGIN
          and wd.company_id=wdu.company_id  
          and wd.profit_ctr_ID=wdu.profit_ctr_ID  
          and wd.sequence_id=wdu.sequence_id    
+		 and wd.manifest=@manifest
   
     Select @ll_cnt_wod=count(*) from WorkorderDetail with(nolock)                                
            Where TSDF_approval_id=@TSDF_approval_id  
            and workorder_ID=@workorder_id_ret  
            and company_id=@company_id           
            and profit_ctr_ID=@profit_ctr_ID  
-           and MANIFEST=TRIM(@MANIFEST)  
+           and MANIFEST=@MANIFEST  
     If @ll_cnt_wod > 0  
     Begin     
      Select @newsequence_id = isnull(max(sequence_id),0), @billing_sequence_id=isnull(max(billing_sequence_id),0) from WorkorderDetail with(nolock)                                
@@ -476,7 +482,7 @@ BEGIN
                                   and workorder_ID=@workorder_id_ret  
                                   and company_id=@company_id           
                                   and profit_ctr_ID=@profit_ctr_ID  
-                                  and MANIFEST=TRIM(@MANIFEST)              
+                                  and MANIFEST=@MANIFEST
     End   
   
         End      
@@ -554,7 +560,7 @@ BEGIN
       )  
       VALUES  
       (  
-      CASE WHEN @resource_type='D' THEN NULLIF(TRIM(upper(@manifest)),'')  
+      CASE WHEN @resource_type='D' THEN NULLIF(upper(@manifest),'')  
       ELSE NULL  
       END,  
       @salesforce_bundle_id,  
@@ -757,7 +763,8 @@ begin catch
 end catch   
 Return 0  
 
-Go
+
+
 GRANT EXECUTE ON OBJECT::[dbo].[sp_sfdc_wod_Insert] TO EQAI  
  
 Go

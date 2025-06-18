@@ -1,4 +1,7 @@
-﻿create procedure [dbo].[sp_labpack_sync_upload_tsdfapprovalwastecode]
+use Plt_ai
+go
+
+alter procedure [dbo].[sp_labpack_sync_upload_tsdfapprovalwastecode]
 	@trip_sync_upload_id	int,
 	@TSDF_approval_id		int,
 	@company_id				int,
@@ -15,13 +18,10 @@ as
  loads to Plt_ai
  
  12/17/2019 - rwb created
-
- NOTE:
- If more than one bill unit needs to be added, create a separate proc like for waste codes
+ 05/21/2025 - CHG0080813 rwb Remove rowguid from the insert, it is being removed from the table
 
 ****************************************************************************************/
 
--- add a check to ensure @profile_id < 0... profiles can only be inserted
 declare @sql_sequence_id	int,
 		@sql				varchar(6000),
 		@user				varchar(10),
@@ -39,7 +39,6 @@ set @sql = 'insert TSDFApprovalWasteCode ('
 + ', waste_code'
 + ', added_by'
 + ', date_added'
-+ ', rowguid'
 + ', sequence_id'
 + ', sequence_flag)'
 + ' values (' + convert(varchar(20),@TSDF_approval_id)
@@ -50,7 +49,6 @@ set @sql = 'insert TSDFApprovalWasteCode ('
 + ', ' + '''' + replace(@waste_code, '''', '''''') + ''''
 + ', ''' + @user + ''''
 + ', getdate()'
-+ ', newid()'
 + ', ' + coalesce(convert(varchar(20),@sequence_id),'null')
 + ', ' + coalesce('''' + replace(@sequence_flag, '''', '''''') + '''','null') + ')'
 
@@ -76,3 +74,4 @@ return 0
 ON_ERROR:
 raiserror(@msg,18,-1) with seterror
 return -1
+go

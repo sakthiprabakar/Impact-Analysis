@@ -3,8 +3,8 @@ drop procedure if exists sp_trip_sync_get_customer
 go
 
 create procedure sp_trip_sync_get_customer
-   @trip_connect_log_id int
-as
+   @trip_connect_log_id INTEGER
+AS
 /***************************************************************************************
  this procedure synchronizes the Customer table on a trip local database
 
@@ -19,138 +19,155 @@ as
  09/04/2015 - rb added consolidate_container_flag
  11/24/2015 - rb new pickup_report_flag in CustomerBilling table
  11/22/2021 - mm DevOps 19701 - Added new CustomerBilling columns for "approved offeror".
+ 04/09/2025 - <rb> it appears that along with a change for Helios (removal of rowguid from Customer table),
+					a bug was introduced adding a comma before the first columns for all 3 INSERT statements.
+					There was no comment for the change, not sure how it happened, so I am adding this one.
+ 04/15/2025 - rb No MIM has been able to download a trip since the prefixed comma was deployed, deploying a fix
+ 04/21/2025 - mm Rally TA537272 - Modified to align with changes to the GeneratorSubLocation table.
 
 ****************************************************************************************/
+BEGIN
 
-declare @s_version varchar(10),
-		@dot int,
-		@version numeric(6,2)
+DECLARE @s_version VARCHAR(10)
+      , @dot INTEGER
+	  , @version NUMERIC(6,2)
 
-set transaction isolation level read uncommitted
+	SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
 
-select @s_version = tcca.client_app_version
-from TripConnectLog tcl, TripConnectClientApp tcca
-where tcl.trip_connect_log_id = @trip_connect_log_id
-and tcl.trip_client_app_id = tcca.trip_client_app_id
+	SELECT @s_version = tcca.client_app_version
+	  FROM TripConnectLog tcl
+	       JOIN TripConnectClientApp tcca on tcl.trip_client_app_id = tcca.trip_client_app_id
+	 WHERE tcl.trip_connect_log_id = @trip_connect_log_id;
 
-select @dot = CHARINDEX('.',@s_version)
-if @dot < 1
-	select @version = CONVERT(int,@s_version)
-else
-	select @version = convert(numeric(6,2),SUBSTRING(@s_version,1,@dot-1)) +
-						(CONVERT(numeric(6,2),SUBSTRING(@s_version,@dot+1,datalength(@s_version))) / 100)
+	SET @dot = CHARINDEX('.', @s_version)
+	IF @dot < 1
+		BEGIN
+			SET @version = CONVERT(INTEGER, @s_version)
+		END
+	ELSE
+		BEGIN
+			SET @version = CONVERT(NUMERIC(6,2), SUBSTRING(@s_version, 1, @dot-1)) +
+						(CONVERT(NUMERIC(6,2), SUBSTRING(@s_version, @dot+1, DATALENGTH(@s_version))) / 100)
+		END
 
-select 'delete Customer where customer_id = ' + convert(varchar(20),Customer.customer_id)
-+ ' insert Customer values('
-+ convert(varchar(20),Customer.customer_ID) + ','
-+ isnull('''' + replace(Customer.cust_name, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.customer_type, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_addr1, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_addr2, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_addr3, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_addr4, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_addr5, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_city, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_state, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_zip_code, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_country, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_sic_code, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_phone, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_fax, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.mail_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(convert(varchar(4096),Customer.cust_directions), '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.terms_code, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.added_by, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.modified_by, '''', '''''') + '''','null') + ','
-+ isnull('''' + convert(varchar(20),Customer.date_added,120) + '''','null') + ','
-+ isnull('''' + convert(varchar(20),Customer.date_modified,120) + '''','null') + ','
-+ isnull('''' + replace(Customer.designation, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.generator_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.web_access_flag, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),Customer.next_WCR),'null') + ','
-+ isnull('''' + replace(Customer.cust_category, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.cust_website, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),Customer.cust_parent_ID),'null') + ','
-+ isnull('''' + replace(Customer.cust_prospect_flag, '''', '''''') + '''','null') + ','
-+ '''' + replace(Customer.rowguid, '''', '''''') + '''' + ','
-+ isnull('''' + replace(Customer.eq_flag, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),Customer.eq_company),'null') + ','
-+ isnull('''' + replace(Customer.customer_cost_flag, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),Customer.cust_naics_code),'null') + ','
-+ isnull('''' + replace(Customer.cust_status, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),Customer.eq_profit_ctr),'null') + ','
-+ isnull('''' + replace(Customer.SPOC_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.bill_to_cust_name, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.bill_to_addr1, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.bill_to_addr2, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.bill_to_addr3, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.bill_to_addr4, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.bill_to_addr5, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.bill_to_city, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.bill_to_state, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.bill_to_zip_code, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.bill_to_country, '''', '''''') + '''','null') + ','
-+ isnull(convert(varchar(20),Customer.credit_limit),'null') + ','
-+ isnull('''' + replace(Customer.labpack_trained_flag, '''', '''''') + '''','null') + ','
-+ isnull('''' + replace(Customer.national_account_flag, '''', '''''') + '''','null')
-+ case when @version < 2.18 then '' else ',' + isnull('''' + replace(Customer.eq_approved_offerer_flag, '''', '''''') + '''','null')
-	+ ',' + isnull('''' + replace(Customer.eq_approved_offerer_desc, '''', '''''') + '''','null')
-	+ ',' + isnull('''' + convert(varchar(20),Customer.eq_offerer_effective_dt,120) + '''','null') end
-+ case when @version < 4.26 then '' else ',' + isnull('''' + replace(Customer.consolidate_containers_flag, '''', '''''') + '''','null') end
-+ ')' as sql
-from Customer, WorkOrderHeader, TripConnectLog
-where Customer.customer_id = WorkOrderHeader.customer_id
-and WorkOrderHeader.trip_id = TripConnectLog.trip_id
-and TripConnectLog.trip_connect_log_id = @trip_connect_log_id
-and isnull(WorkOrderHeader.field_requested_action,'') <> 'D'
-and (Customer.date_modified > isnull(TripConnectLog.last_download_date,'01/01/1900')
-     or WorkOrderHeader.date_added > isnull(TripConnectLog.last_download_date,'01/01/1900')
-     or WorkOrderHeader.field_requested_action = 'R')
-union
-select distinct 'delete GeneratorSubLocation where customer_id = ' + convert(varchar(20),GeneratorSubLocation.customer_id) + ' and generator_sublocation_id = ' + convert(varchar(20),GeneratorSubLocation.generator_sublocation_id)
-+ ' insert GeneratorSubLocation values('
-+ convert(varchar(20),GeneratorSubLocation.customer_ID) + ','
-+ convert(varchar(20),GeneratorSubLocation.generator_sublocation_ID) + ','
-+ '''' + replace(GeneratorSubLocation.status, '''', '''''') + '''' + ','
-+ '''' + replace(GeneratorSubLocation.code, '''', '''''') + '''' + ','
-+ '''' + replace(GeneratorSubLocation.description, '''', '''''') + '''' + ','
-+ isnull('''' + replace(GeneratorSubLocation.added_by, '''', '''''') + '''','null') + ','
-+ isnull('''' + convert(varchar(20),GeneratorSubLocation.date_added,120) + '''','null') + ','
-+ isnull('''' + replace(GeneratorSubLocation.modified_by, '''', '''''') + '''','null') + ','
-+ isnull('''' + convert(varchar(20),GeneratorSubLocation.date_modified,120) + '''','null')
-+ ')' as sql
-from GeneratorSubLocation, WorkOrderHeader, TripConnectLog
-where GeneratorSubLocation.customer_id = WorkOrderHeader.customer_id
-and WorkOrderHeader.trip_id = TripConnectLog.trip_id
-and TripConnectLog.trip_connect_log_id = @trip_connect_log_id
-and (WorkOrderHeader.field_upload_date is null or TripConnectLog.last_download_date is null)
-and isnull(WorkOrderHeader.field_requested_action,'') <> 'D'
-and @version >= 4.16
-union
-select distinct 'delete CustomerBilling where customer_id = ' + convert(varchar(20),WorkOrderHeader.customer_id) + ' and billing_project_id = ' + convert(varchar(20),WorkOrderHeader.billing_project_id)
-+ ' insert CustomerBilling values('
-+ convert(varchar(20),WorkOrderHeader.customer_ID) + ','
-+ convert(varchar(20),WorkOrderHeader.billing_project_ID) + ','
-+ isnull('''' + replace(CustomerBilling.pickup_report_flag, '''', '''''') + '''','null')
-+ case when @version < 4.81 then '' else ',' + isnull('''' + replace(CustomerBilling.eq_offeror_bp_override_flag, '''', '''''') + '''','null')
-	+ ',' + isnull('''' + replace(CustomerBilling.eq_approved_offeror_flag, '''', '''''') + '''','null')
-	+ ',' + isnull('''' + replace(CustomerBilling.eq_approved_offeror_desc, '''', '''''') + '''','null')
-	+ ',' + isnull('''' + convert(varchar(20),CustomerBilling.eq_offeror_effective_dt,120) + '''','null') end
-+ ')' as sql
-from CustomerBilling, WorkOrderHeader, TripConnectLog
-where CustomerBilling.customer_id = WorkOrderHeader.customer_id
-and CustomerBilling.billing_project_id = WorkOrderHeader.billing_project_id
-and WorkOrderHeader.trip_id = TripConnectLog.trip_id
-and TripConnectLog.trip_connect_log_id = @trip_connect_log_id
-and (WorkOrderHeader.field_upload_date is null or TripConnectLog.last_download_date is null)
-and WorkOrderHeader.workorder_status <> 'V'
-and WorkOrderHeader.billing_project_id is not null
-and isnull(WorkOrderHeader.field_requested_action,'') <> 'D'
-and @version >= 4.29
+	SELECT 'DELETE FROM Customer WHERE customer_id = ' + CONVERT(VARCHAR(20), c.customer_id)
+         + ' INSERT INTO Customer '
+		 + ' VALUES('
+               + CONVERT(VARCHAR(20), c.customer_ID)
+         + ',' + ISNULL('''' + REPLACE(c.cust_name, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.customer_type, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_addr1, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_addr2, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_addr3, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_addr4, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_addr5, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_city, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_state, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_zip_code, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_country, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_sic_code, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_phone, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_fax, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.mail_flag, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(CONVERT(VARCHAR(4096), c.cust_directions), '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.terms_code, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(LEFT(c.added_by,10), '''', '''''') + '''', 'NULL')				--<
+         + ',' + ISNULL('''' + REPLACE(LEFT(c.modified_by,10), '''', '''''') + '''', 'NULL')			--<
+         + ',' + ISNULL('''' + CONVERT(VARCHAR(20), c.date_added,120) + '''', 'NULL')
+         + ',' + ISNULL('''' + CONVERT(VARCHAR(20), c.date_modified,120) + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.designation, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.generator_flag, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.web_access_flag, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL(CONVERT(VARCHAR(20), c.next_WCR), 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_category, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_website, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL(CONVERT(VARCHAR(20), c.cust_parent_ID), 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_prospect_flag, '''', '''''') + '''', 'NULL')
+         + ', ''''' --+ ',' + '''' + REPLACE(Customer.rowguid, '''', '''''') + ''''
+         + ',' + ISNULL('''' + REPLACE(c.eq_flag, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL(CONVERT(VARCHAR(20), c.eq_company), 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.customer_cost_flag, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL(CONVERT(VARCHAR(20), c.cust_naics_code), 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.cust_status, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL(CONVERT(VARCHAR(20), c.eq_profit_ctr), 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.SPOC_flag, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.bill_to_cust_name, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.bill_to_addr1, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.bill_to_addr2, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.bill_to_addr3, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.bill_to_addr4, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.bill_to_addr5, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.bill_to_city, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.bill_to_state, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.bill_to_zip_code, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.bill_to_country, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL(CONVERT(VARCHAR(20), c.credit_limit), 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.labpack_trained_flag, '''', '''''') + '''', 'NULL')
+         + ',' + ISNULL('''' + REPLACE(c.national_account_flag, '''', '''''') + '''', 'NULL')
+         + CASE WHEN @version < 2.18 THEN '' ELSE ',' + ISNULL('''' + REPLACE(c.eq_approved_offerer_flag, '''', '''''') + '''', 'NULL')
+         	+ ',' + ISNULL('''' + REPLACE(c.eq_approved_offerer_desc, '''', '''''') + '''', 'NULL')
+         	+ ',' + ISNULL('''' + CONVERT(VARCHAR(20), c.eq_offerer_effective_dt,120) + '''', 'NULL') END
+         + CASE WHEN @version < 4.26 THEN '' ELSE ',' + ISNULL('''' + REPLACE(c.consolidate_containers_flag, '''', '''''') + '''', 'NULL') END
+         + ')' as [sql]
+	  FROM Customer c
+	       JOIN WorkOrderHeader h on c.customer_id = h.customer_id
+	       JOIN TripConnectLog tcl on h.trip_id = tcl.trip_id
+	 WHERE tcl.trip_connect_log_id = @trip_connect_log_id
+	   AND ISNULL(h.field_requested_action,'') <> 'D'
+	   AND (c.date_modified > ISNULL(tcl.last_download_date,'01/01/1900')
+            OR h.date_added > ISNULL(tcl.last_download_date,'01/01/1900')
+            OR h.field_requested_action = 'R')
 
+	UNION
+	SELECT DISTINCT 'DELETE FROM GeneratorSubLocation WHERE customer_id = ' + CONVERT(VARCHAR(20), g.customer_id)
+	     + ' and generator_sublocation_id = ' + CONVERT(VARCHAR(20), g.generator_sublocation_id)
+         + ' INSERT INTO GeneratorSubLocation '
+		 + ' VALUES ('
+		 + CONVERT(VARCHAR(20),g.customer_ID)
+		 + ','+ CONVERT(VARCHAR(20),g.generator_sublocation_ID)
+		 + ','+ '''' + REPLACE(g.[status], '''', '''''') + ''''
+		 + ','+ '''' + REPLACE(g.code, '''', '''''') + ''''
+		 + ','+ '''' + REPLACE(g.[description], '''', '''''') + ''''
+		 + ','+ ISNULL('''' + REPLACE(LEFT(g.added_by, 10), '''', '''''') + '''', 'NULL')
+		 + ','+ ISNULL('''' + CONVERT(VARCHAR(20),g.date_added,120) + '''', 'NULL')
+		 + ','+ ISNULL('''' + REPLACE(LEFT(g.modified_by, 10), '''', '''''') + '''', 'NULL')
+		 + ','+ ISNULL('''' + CONVERT(VARCHAR(20), g.date_modified,120) + '''', 'NULL')
+		 + ')' as [sql]
+	  FROM GeneratorSubLocation g
+	       JOIN WorkOrderHeader h on g.customer_id = h.customer_id
+		   JOIN TripConnectLog tcl on h.trip_id = tcl.trip_id
+	 WHERE tcl.trip_connect_log_id = @trip_connect_log_id
+	   AND (h.field_upload_date IS NULL OR tcl.last_download_date IS NULL)
+	   AND h.field_requested_action <> 'D'
+	   AND @version >= 4.16
+
+	UNION
+	SELECT DISTINCT 'DELETE FROM CustomerBilling WHERE customer_id = ' + CONVERT(VARCHAR(20), h.customer_id)
+	     + ' and billing_project_id = ' + CONVERT(VARCHAR(20), h.billing_project_id)
+		 + ' INSERT INTO CustomerBilling VALUES('
+		 + CONVERT(VARCHAR(20),h.customer_ID)
+		 + ',' + CONVERT(VARCHAR(20),h.billing_project_ID)
+		 + ',' + ISNULL('''' + REPLACE(b.pickup_report_flag, '''', '''''') + '''', 'NULL')
+		 + CASE WHEN @version < 4.81 THEN '' 
+		        ELSE ',' + ISNULL('''' + REPLACE(b.eq_offeror_bp_override_flag, '''', '''''') + '''', 'NULL')
+		 	       + ',' + ISNULL('''' + REPLACE(b.eq_approved_offeror_flag, '''', '''''') + '''', 'NULL')
+		 	       + ',' + ISNULL('''' + REPLACE(b.eq_approved_offeror_desc, '''', '''''') + '''', 'NULL')
+		 	       + ',' + ISNULL('''' + CONVERT(VARCHAR(20),b.eq_offeror_effective_dt,120) + '''', 'NULL')
+			END
+		 + ')' as [sql]
+	  FROM CustomerBilling b
+	       JOIN WorkOrderHeader h on b.customer_id = h.customer_id
+		        and b.billing_project_id = h.billing_project_id
+	       JOIN TripConnectLog tcl on h.trip_id = tcl.trip_id
+	 WHERE tcl.trip_connect_log_id = @trip_connect_log_id
+	   AND (h.field_upload_date IS NULL OR tcl.last_download_date IS NULL)
+	   AND h.workorder_status <> 'V'
+	   AND h.billing_project_id IS NOT NULL
+	   AND h.field_requested_action <> 'D'
+	   AND @version >= 4.29;
+END
 
 GO
 GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_trip_sync_get_customer] TO [EQAI]
-    AS [dbo];
+    ON OBJECT::[dbo].[sp_trip_sync_get_customer] TO [EQAI];
 

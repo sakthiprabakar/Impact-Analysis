@@ -1,7 +1,6 @@
-﻿
-create procedure sp_trip_sync_get_tsdf
-   @trip_connect_log_id int
-as
+﻿ALTER PROCEDURE dbo.sp_trip_sync_get_tsdf
+      @trip_connect_log_id INTEGER
+AS
 /***************************************************************************************
  this procedure synchronizes the TSDF table on a trip local database
 
@@ -16,138 +15,148 @@ as
  08/15/2012 - rb Version 3.0 LabPack .. pull entire table for LabPack trip
  06/13/2018 - rb GEM:51542 add support to sync TSDF_codes renamed in EQAI
  09/11/2018 - rb Correction made for GEM:51542 to correct duplicate TSDFs after downloading a trip, before first sync
+ 01/20/2025 - BC adjustments for Titan
+ 01/23/2025 - MPM - Rally US139807 - Since we're removing the rowguid column from the Plt_ai 
+					version of the TSDF table, and because the MIM version of this table 
+					will still have this column (which is nullable), modified this stored
+					procedure to insert a NULL value in that MIM table column.
+ 02/11/2025 - MPM - Rally US139807 - Per Blair, added GO statement at end.
+ ****************************************************************************************/
+BEGIN
 
-****************************************************************************************/
+declare @s_version VARCHAR(10)
+      ,	@dot INTEGER
+	  ,	@version NUMERIC(6,2)
+	  ,	@lab_pack_flag CHAR(1)
+	  ,	@last_download_date DATETIME
 
-declare @s_version varchar(10),
-	@dot int,
-	@version numeric(6,2),
-	@lab_pack_flag char(1),
-	@last_download_date datetime
+set transaction isolation level read uncommitted;
 
-set transaction isolation level read uncommitted
+SELECT @s_version = tcca.client_app_version
+  FROM TripConnectLog tcl
+       JOIN TripConnectClientApp tcca on tcl.trip_client_app_id = tcca.trip_client_app_id
+ WHERE tcl.trip_connect_log_id = @trip_connect_log_id
+;
 
-select @s_version = tcca.client_app_version
-from TripConnectLog tcl, TripConnectClientApp tcca
-where tcl.trip_connect_log_id = @trip_connect_log_id
-and tcl.trip_client_app_id = tcca.trip_client_app_id
+SELECT @dot = CHARINDEX('.',@s_version)
 
-select @dot = CHARINDEX('.',@s_version)
-if @dot < 1
-	select @version = CONVERT(int,@s_version)
-else
-	select @version = convert(numeric(6,2),SUBSTRING(@s_version,1,@dot-1)) +
-						(CONVERT(numeric(6,2),SUBSTRING(@s_version,@dot+1,datalength(@s_version))) / 100)
+IF @dot < 1
+	SELECT @version = CONVERT(INTEGER,@s_version)
+ELSE
+	SELECT @version = CONVERT(NUMERIC(6,2),SUBSTRING(@s_version,1,@dot-1)) +
+						(CONVERT(NUMERIC(6,2),SUBSTRING(@s_version,@dot+1,datalength(@s_version))) / 100)
 
-select @lab_pack_flag = isnull(th.lab_pack_flag,'F')
-from TripHeader th
-join TripConnectLog tcl
-	on tcl.trip_id = th.trip_id
-	and tcl.trip_connect_log_id = @trip_connect_log_id
+SELECT @lab_pack_flag = ISNULL(th.lab_pack_flag,'F')
+  FROM TripHeader th
+       JOIN TripConnectLog tcl on tcl.trip_id = th.trip_id
+ WHERE tcl.trip_connect_log_id = @trip_connect_log_id
 
-select @last_download_date = last_download_date
-from TripConnectLog
-where trip_connect_log_id = @trip_connect_log_id
+SELECT @last_download_date = last_download_date
+  FROM TripConnectLog
+ WHERE trip_connect_log_id = @trip_connect_log_id
 
 
 -- for labpack, pull entire table
-if @lab_pack_flag = 'T' and (@last_download_date is null
-			or exists (select 1 from TripConnectLog tcl
-				join WorkOrderHeader wh on tcl.trip_id = wh.trip_id
-							and wh.field_requested_action = 'R'
-				where tcl.trip_connect_log_id = @trip_connect_log_id))
+IF @lab_pack_flag = 'T'
+	AND (@last_download_date IS NULL OR EXISTS (
+	     SELECT 1
+		   FROM TripConnectLog tcl
+				JOIN WorkOrderHeader wh on tcl.trip_id = wh.trip_id
+					 AND wh.field_requested_action = 'R'
+		  WHERE tcl.trip_connect_log_id = @trip_connect_log_id))
+	BEGIN
+		SELECT 'truncate table TSDF' as [sql]
+		 UNION
+		SELECT 'insert into TSDF values('
+		     + '''' + REPLACE(TSDF.TSDF_code, '''', '''''') + ''''
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_status, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_name, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_addr1, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_addr2, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_addr3, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_EPA_ID, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_phone, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_fax, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_contact, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_contact_phone, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_city, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_state, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_zip_code, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.state_regulatory_id, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.facility_type, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.emergency_contact_phone, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.eq_flag, '''', '''''') + '''','null')
+		     + ',' + ISNULL(CONVERT(VARCHAR(20),TSDF.eq_company),'null')
+		     + ',' + ISNULL(CONVERT(VARCHAR(20),TSDF.eq_profit_ctr),'null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.directions, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.comments, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(LEFT(TSDF.added_by,10), '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + CONVERT(VARCHAR(20),TSDF.date_added,120) + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(LEFT(TSDF.modified_by,10), '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + CONVERT(VARCHAR(20),TSDF.date_modified,120) + '''','null')
+		     --+ ',' + '''' + REPLACE(TSDF.rowguid, '''', '''''') + ''''
+			 + ', NULL'
+		     + ',' + ISNULL('''' + REPLACE(TSDF.DEA_ID, '''', '''''') + '''','null')
+		     + ',' + ISNULL('''' + REPLACE(TSDF.DEA_phone, '''', '''''') + '''','null')
+			 + ')' as [sql]
+		  FROM TSDF
+		 ORDER BY [sql] DESC													
+	END
+ELSE
+	BEGIN
 
+	SELECT DISTINCT 'delete from TSDF where TSDF_code = ''' + wd.tsdf_code + '''' as [sql]
+	  FROM WorkOrderDetail wd
+	       JOIN WorkOrderHeader wh on wh.workorder_id = wd.workorder_id
+		        AND wh.company_id = wd.company_id
+		        AND wh.profit_ctr_id = wd.profit_ctr_id
+	       JOIN TripConnectLog tcl on tcl.trip_id = wh.trip_id
+		        AND tcl.trip_connect_log_id = @trip_connect_log_id
+	 WHERE wd.resource_type = 'D'
+	   AND wd.tsdf_code <> ''
+	 UNION
+	SELECT DISTINCT 'insert into TSDF values('
+	     + '''' + REPLACE(TSDF.TSDF_code, '''', '''''') + ''''
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_status, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_name, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_addr1, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_addr2, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_addr3, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_EPA_ID, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_phone, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_fax, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_contact, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_contact_phone, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_city, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_state, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.TSDF_zip_code, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.state_regulatory_id, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.facility_type, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.emergency_contact_phone, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.eq_flag, '''', '''''') + '''','null')
+	     + ',' + ISNULL(CONVERT(VARCHAR(20),TSDF.eq_company),'null')
+	     + ',' + ISNULL(CONVERT(VARCHAR(20),TSDF.eq_profit_ctr),'null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.directions, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(TSDF.comments, '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(LEFT(TSDF.added_by,10), '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + CONVERT(VARCHAR(20),TSDF.date_added,120) + '''','null')
+	     + ',' + ISNULL('''' + REPLACE(LEFT(TSDF.modified_by,10), '''', '''''') + '''','null')
+	     + ',' + ISNULL('''' + CONVERT(VARCHAR(20),TSDF.date_modified,120) + '''','null')
+	     --+ ',' + '''' + REPLACE(TSDF.rowguid, '''', '''''') + ''''
+		 + ', NULL'
+	     + CASE WHEN @version < 2.02 THEN '' ELSE ',' + ISNULL('''' + REPLACE(TSDF.DEA_ID, '''', '''''') + '''','null') END
+	     + CASE WHEN @version < 2.16 THEN '' ELSE ',' + ISNULL('''' + REPLACE(TSDF.DEA_phone, '''', '''''') + '''','null') END
+	     + ')' as [sql]
+	  FROM TSDF
+	       JOIN WorkOrderDetail d on TSDF.TSDF_code = d.TSDF_code
+	       JOIN WorkOrderHeader h on d.workorder_id = h.workorder_id
+	            AND d.company_id = h.company_id
+	            AND d.profit_ctr_id = h.profit_ctr_id
+	       JOIN TripConnectLog tcl on h.trip_id = tcl.trip_id
+	 WHERE d.resource_type = 'D'
+	   AND tcl.trip_connect_log_id = @trip_connect_log_id
+	 ORDER BY [sql] ASC;
+	END;
 
-	select 'truncate table TSDF' as sql
-	union
-	select 'insert into TSDF values('
-	+ '''' + replace(TSDF.TSDF_code, '''', '''''') + '''' + ','
-	+ isnull('''' + replace(TSDF.TSDF_status, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_name, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_addr1, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_addr2, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_addr3, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_EPA_ID, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_phone, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_fax, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_contact, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_contact_phone, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_city, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_state, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_zip_code, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.state_regulatory_id, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.facility_type, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.emergency_contact_phone, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.eq_flag, '''', '''''') + '''','null') + ','
-	+ isnull(convert(varchar(20),TSDF.eq_company),'null') + ','
-	+ isnull(convert(varchar(20),TSDF.eq_profit_ctr),'null') + ','
-	+ isnull('''' + replace(TSDF.directions, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.comments, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.added_by, '''', '''''') + '''','null') + ','
-	+ isnull('''' + convert(varchar(20),TSDF.date_added,120) + '''','null') + ','
-	+ isnull('''' + replace(TSDF.modified_by, '''', '''''') + '''','null') + ','
-	+ isnull('''' + convert(varchar(20),TSDF.date_modified,120) + '''','null') + ','
-	+ '''' + replace(TSDF.rowguid, '''', '''''') + '''' + ','
-	+ isnull('''' + replace(TSDF.DEA_ID, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.DEA_phone, '''', '''''') + '''','null') + ')' as sql
-	from TSDF
-	order by sql desc
-else
-	select distinct 'delete from TSDF where TSDF_code = ''' + wd.tsdf_code + '''' as sql
-	from WorkOrderDetail wd
-	join WorkOrderHeader wh
-		on wh.workorder_id = wd.workorder_id
-		and wh.company_id = wd.company_id
-		and wh.profit_ctr_id = wd.profit_ctr_id
-	join TripConnectLog tcl
-		on tcl.trip_id = wh.trip_id
-		and tcl.trip_connect_log_id = @trip_connect_log_id
-	where wd.resource_type = 'D'
-	and coalesce(wd.tsdf_code,'') <> ''
-	union
-	select distinct 'insert into TSDF values('
-	+ '''' + replace(TSDF.TSDF_code, '''', '''''') + '''' + ','
-	+ isnull('''' + replace(TSDF.TSDF_status, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_name, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_addr1, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_addr2, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_addr3, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_EPA_ID, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_phone, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_fax, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_contact, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_contact_phone, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_city, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_state, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.TSDF_zip_code, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.state_regulatory_id, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.facility_type, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.emergency_contact_phone, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.eq_flag, '''', '''''') + '''','null') + ','
-	+ isnull(convert(varchar(20),TSDF.eq_company),'null') + ','
-	+ isnull(convert(varchar(20),TSDF.eq_profit_ctr),'null') + ','
-	+ isnull('''' + replace(TSDF.directions, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.comments, '''', '''''') + '''','null') + ','
-	+ isnull('''' + replace(TSDF.added_by, '''', '''''') + '''','null') + ','
-	+ isnull('''' + convert(varchar(20),TSDF.date_added,120) + '''','null') + ','
-	+ isnull('''' + replace(TSDF.modified_by, '''', '''''') + '''','null') + ','
-	+ isnull('''' + convert(varchar(20),TSDF.date_modified,120) + '''','null') + ','
-	+ '''' + replace(TSDF.rowguid, '''', '''''') + ''''
-	+ case when @version < 2.02 then '' else ',' + isnull('''' + replace(TSDF.DEA_ID, '''', '''''') + '''','null') end
-	+ case when @version < 2.16 then '' else ',' + isnull('''' + replace(TSDF.DEA_phone, '''', '''''') + '''','null') end
-	+ ')' as sql
-	from TSDF, WorkOrderDetail, WorkOrderHeader, TripConnectLog
-	where TSDF.TSDF_code = WorkOrderDetail.TSDF_code
-	and WorkOrderDetail.workorder_id = WorkOrderHeader.workorder_id
-	and WorkOrderDetail.company_id = WorkOrderHeader.company_id
-	and WorkOrderDetail.profit_ctr_id = WorkOrderHeader.profit_ctr_id
-	and WorkOrderDetail.resource_type = 'D'
-	and WorkOrderHeader.trip_id = TripConnectLog.trip_id
-	and TripConnectLog.trip_connect_log_id = @trip_connect_log_id
-	order by sql asc
-
+END;
 GO
-GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_trip_sync_get_tsdf] TO [EQAI]
-    AS [dbo];
-

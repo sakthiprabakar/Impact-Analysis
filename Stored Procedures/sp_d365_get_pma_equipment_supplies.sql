@@ -1,10 +1,7 @@
 use Plt_ai
 go
 
-drop procedure if exists dbo.sp_d365_get_pma_equipment_supplies
-go
-
-create procedure sp_d365_get_pma_equipment_supplies
+alter procedure sp_d365_get_pma_equipment_supplies
 	@d365_pma_export_uid int
 as
 /*
@@ -16,6 +13,9 @@ as
 06/21/2024 - rwb - SN CHG0072360  - To support cross-company shared resources, join WorkOrderDetail and Resource on new resource_uid column
 				    (was in TEST since June, deployed to prod January 2025)
 10/02/2024 - rwb - SN CHG0075054 - Add company 68
+01/31/2025 - rwb - SN CHG0077985 - Reference cost_quantity for Equipment quantities
+04/08/2025 - rwb - SN CHG0080156 - Add 14-00 & all of 65, except 65-02
+05/06/2025 - rwb - SN CHG0080423 - 14-00 has workorder_ids and D365 projects that end up exceeding the 40 character limit of DESCRIPTION. Increase to varchar(50)
 
 
 select * from D365PMAExport order by d365_pma_export_uid desc
@@ -41,6 +41,8 @@ set @user = left(replace(suser_name(),'(2)',''),10)
 select @posting_type = posting_type,
 	@compare_dt = case when company_id in (62, 63, 64)
 						then '04/01/2023'
+						when (company_id = 14 and profit_ctr_id = 0) or (company_id = 65 and profit_ctr_id <> 2)
+						then '05/01/2025'
 						else 
 						case company_id
 							when 68
@@ -207,7 +209,7 @@ begin
 	create table #t (
 		SOURCEAPP varchar(20) not null,
 		SOURCEID int not null,
-		DESCRIPTION varchar(40) not null,
+		DESCRIPTION varchar(50) not null,
 		POSTINGLAYER varchar(20) not null,
 		ACCOUNTCOMPANY varchar(20) not null,
 		ACCOUNTTYPE varchar(20) not null,
@@ -290,7 +292,7 @@ begin
 		--The following was added to try to reduce # of transactions when a large number
 		--of workorderdetail records get date_modified updated, but 3 key PMA fields weren't modified
 		and (coalesce(wod.cost,0) <> coalesce(xh.PROJECTCOSTPRICE,0) or
-			coalesce(wod.quantity_used,0) <> coalesce(xh.QUANTITY,0) or
+			case when wod.resource_type = 'E' then coalesce(wod.cost_quantity,0) else coalesce(wod.quantity_used,0) end <> coalesce(xh.QUANTITY,0) or
 			coalesce(wod.date_service,woh.start_date) <> coalesce(xh.PROJECTDATE,'01/01/2000') or
 			coalesce('WO ' + right('0' + convert(varchar(10),woh.company_id),2) + '-' + right('0' + convert(varchar(10),woh.profit_ctr_id),2) + '-' + convert(varchar(15),woh.workorder_id)
 			+ ' | ' + wod.resource_type + convert(varchar(10),wod.sequence_id)
@@ -327,7 +329,10 @@ begin
 		'Ledger' OFFSETACCOUNTTYPE,
 		coalesce(pc_d.AX_Dimension_1,pc.AX_Dimension_1,'') OFFSETCOMPANY,
 		convert(varchar(10),case when wod.date_service is null then woh.start_date else wod.date_service end,120) PROJECTDATE,
-		convert(numeric(12,4),wod.quantity_used) QUANTITY,
+		convert(numeric(12,4),case when wod.resource_type = 'E'
+								then coalesce(wod.cost_quantity,0)
+								else coalesce(wod.quantity_used,0)
+							end) QUANTITY,
 		'No' Transfer,
 		convert(varchar(10),case when wod.date_service is null then woh.start_date else wod.date_service end,120) VOUCHERDATE,
 		'' DOCUMENT,
@@ -385,7 +390,7 @@ begin
 							and status = 'A')
 	where @posting_type = 'F' or
 		(coalesce(wod.cost,0) <> coalesce(xh.PROJECTCOSTPRICE,0) or
-			coalesce(wod.quantity_used,0) <> coalesce(xh.QUANTITY,0) or
+			case when wod.resource_type = 'E' then coalesce(wod.cost_quantity,0) else coalesce(wod.quantity_used,0) end <> coalesce(xh.QUANTITY,0) or
 			coalesce(wod.date_service,woh.start_date) <> coalesce(xh.PROJECTDATE,'01/01/2000') or
 			coalesce('WO ' + right('0' + convert(varchar(10),woh.company_id),2) + '-' + right('0' + convert(varchar(10),woh.profit_ctr_id),2) + '-' + convert(varchar(15),woh.workorder_id)
 			+ ' | ' + wod.resource_type + convert(varchar(10),wod.sequence_id)
@@ -558,7 +563,4 @@ end
 
 --return JSON
 select coalesce(@json,'') as json
-go
-
-grant execute on sp_d365_get_pma_equipment_supplies to EQAI, AX_SERVICE
 go

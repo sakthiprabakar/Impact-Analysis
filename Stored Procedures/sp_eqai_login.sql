@@ -1,4 +1,4 @@
-﻿create procedure sp_eqai_login
+﻿create procedure [dbo].[sp_eqai_login]
 	@user_id			varchar(15),
 	@password			varchar(30),
 	@connect_type		varchar(10),
@@ -16,7 +16,7 @@ as
  01/15/2019 RWB	GEM-57612 Add ability to connect to new MSS 2016 servers (dbo.fn_encode() moved from master to to Plt_ai)
  02/25/2020 AM modified @eqai_server varchar(30 ) to @eqai_server varchar(100).
  06/03/2020 MPM  DevOps 16147 - Increased "printer" variables to varchar(200).
-
+ 04/28/2025	Sailaja	Rally # DE38864 - Default Printer - Printing to incorrect printer
 ****************************************************************************************/
 
 declare @user_2_id					varchar(15),
@@ -56,7 +56,8 @@ declare @user_2_id					varchar(15),
 		@user_email					varchar(80), -- rb 06/16/2011
 		@user_first_name			varchar(30),
 		@user_last_name				varchar(30),
-		@count						int
+		@count						int,
+		@printer_default	varchar(200)
 
 --		
 -- from connection to PROD
@@ -205,6 +206,7 @@ end
 		@group_id = group_id,
 		@printer_nonrcra_label = printer_nonrcra_label,
 		@printer_universal_label = printer_universal_label,
+		@printer_default = printer_default,
 		@user_name = isnull(user_name,''),
 		@user_email = isnull(email,''),
 		@user_first_name = ISNULL(CASE WHEN CHARINDEX(' ', user_name) = 0 THEN user_name
@@ -251,7 +253,8 @@ select @user_2_id as user_2_id,
 	@user_name as user_name,
 	@user_email as email,
 	@user_first_name as user_first_name,
-	@user_last_name as user_last_name
+	@user_last_name as user_last_name,
+	@printer_default as printer_default
 go
 
 grant execute on sp_eqai_login to public

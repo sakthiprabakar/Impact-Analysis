@@ -155,6 +155,7 @@ PB Object(s):	w_popup_billing_submit
 02/04/2025 KS	Rally US141341 - Invoice Processing - Customer Change should result in new Invoice.
 				Added logic to populate BillingComment.customer_id to enable comparison with Receipt.customer_id. 
 				This helps determine whether to create a new invoice or revise an existing one.
+05/19/2025 AKA  Rally:DE39146 -Inserted fixed_price_flag and print_on_invoice_flag 'TRUE' records into Billing table to print the line items in Invoice
 
 sp_billing_submit 1, 21, 0, 'R', 773356, '10-28-2010 16:02', NULL, 'JASON_B', ''
 sp_billing_submit 1, 14, 0, 'W', 11180200, '2/15/11 15:43', NULL, 'JASON_B', ''
@@ -1964,7 +1965,12 @@ BEGIN
 	END		-- IF @fixed_price_flag = 'T'
 		      --IF @debug = 1 print 'Selecting fixed price #BillingDetail workorder records:'
 	       --   IF @debug = 1 SELECT * FROM #BillingDetail
-	ELSE
+	IF @fixed_price_flag = 'F' OR ( @fixed_price_flag = 'T' AND EXISTS(SELECT 1 FROM WorkOrderDetail
+																		  WHERE company_id = @company_id
+																			AND profit_ctr_id = @profit_ctr_id
+																			AND workorder_id = @receipt_id
+																			AND bill_rate > - 2 -- unvoided line
+																			AND print_on_invoice_flag = 'T'))
 	BEGIN
 		--IF @debug = 1 print 'Not a fixed price workorder'
 		-- Not a fixed price workorder
@@ -2105,9 +2111,9 @@ BEGIN
 			4 AS tender_type,
 			'' AS tender_comment,
 			WorkorderDetail.quantity_used AS quantity,
-			CASE WHEN WorkorderDetail.extended_price = 0 THEN 0 ELSE WorkorderDetail.price END AS price,
+			CASE WHEN (@fixed_price_flag = 'T' AND WorkorderDetail.print_on_invoice_flag = 'T' ) THEN 0 ELSE CASE WHEN WorkorderDetail.extended_price = 0 THEN 0 ELSE WorkorderDetail.price END END AS price,
 			0 AS add_charge_amt,
-			WorkorderDetail.extended_price AS orig_extended_amt,
+			CASE WHEN (@fixed_price_flag = 'T' AND WorkorderDetail.print_on_invoice_flag = 'T' ) THEN 0 ELSE WorkorderDetail.extended_price END AS orig_extended_amt,
 			CASE WHEN @discount_flag = 'T' THEN ISNULL(CustomerBilling.cust_discount,0) ELSE 0 END AS discount_percent,
 			--gl_account_code = CASE WHEN ISNUMERIC(REPLACE(LEFT(ResourceClassGLAccount.gl_account_code,5),' ','X')) > 0 OR LEFT(ResourceClassGLAccount.gl_account_code,5) = '00000'
 			--		THEN LEFT(ResourceClassGLAccount.gl_account_code,5)
@@ -2125,9 +2131,9 @@ BEGIN
 			'' AS sr_type,
 			'E' AS sr_type_code,
 			0 AS sr_price,
-			WorkorderDetail.extended_price AS waste_extended_amt,
+			CASE WHEN (@fixed_price_flag = 'T' AND WorkorderDetail.print_on_invoice_flag = 'T' ) THEN 0 ELSE WorkorderDetail.extended_price END AS waste_extended_amt,
 			0 AS sr_extended_amt,
-			WorkorderDetail.extended_price AS total_extended_amt,
+			CASE WHEN (@fixed_price_flag = 'T' AND WorkorderDetail.print_on_invoice_flag = 'T' ) THEN 0 ELSE WorkorderDetail.extended_price END AS total_extended_amt,
 			0 AS cash_received,
 			ISNULL(WorkorderDetail.manifest,'') AS manifest,
 			manifest_flag = CASE WHEN WorkorderDetail.manifest IS NULL THEN '' ELSE 'M' END,
@@ -2268,8 +2274,8 @@ BEGIN
 		LEFT OUTER JOIN CustomerBilling ON WorkorderHeader.customer_id = CustomerBilling.customer_id
 			AND WorkorderHeader.billing_project_id = CustomerBilling.billing_project_id
 		LEFT OUTER JOIN Generator ON WorkorderHeader.generator_id = Generator.generator_id
-		WHERE (WorkorderHeader.fixed_price_flag = 'F' OR WorkorderHeader.fixed_price_flag IS NULL)
-		AND WorkorderHeader.company_id = @company_id
+		WHERE /*(WorkorderHeader.fixed_price_flag = 'F' OR WorkorderHeader.fixed_price_flag IS NULL)
+		AND*/ WorkorderHeader.company_id = @company_id
 		AND WorkorderHeader.profit_ctr_id = @profit_ctr_id
 		AND WorkorderHeader.workorder_id = @receipt_id
 		AND WorkorderHeader.workorder_status = 'A'
@@ -2329,9 +2335,9 @@ BEGIN
 			4 AS tender_type,
 			'' AS tender_comment,
 			WorkorderDetailUnit.quantity AS quantity,
-			CASE WHEN WorkorderDetailunit.extended_price = 0 THEN 0 ELSE WorkorderDetailunit.price END AS price,
+			CASE WHEN (@fixed_price_flag = 'T' AND WorkorderDetail.print_on_invoice_flag = 'T' ) THEN 0 ELSE CASE WHEN WorkorderDetailunit.extended_price = 0 THEN 0 ELSE WorkorderDetailunit.price END END AS price,
 			0 AS add_charge_amt,
-			WorkorderDetailunit.extended_price AS orig_extended_amt,
+			CASE WHEN (@fixed_price_flag = 'T' AND WorkorderDetail.print_on_invoice_flag = 'T' ) THEN 0 ELSE WorkorderDetailunit.extended_price END AS orig_extended_amt,
 			CASE WHEN @discount_flag = 'T' THEN ISNULL(CustomerBilling.cust_discount,0) ELSE 0 END AS discount_percent,
 			--gl_account_code = WorkOrderResourceType.gl_seg_1 
 			--	+ RIGHT('00' + CONVERT(varchar(2),WorkOrderHeader.company_id),2)
@@ -2343,9 +2349,9 @@ BEGIN
 			'' AS sr_type,
 			'E' AS sr_type_code,
 			0 AS sr_price,
-			WorkorderDetailunit.extended_price AS waste_extended_amt,
+			CASE WHEN (@fixed_price_flag = 'T' AND WorkorderDetail.print_on_invoice_flag = 'T' ) THEN 0 ELSE  WorkorderDetailunit.extended_price END AS waste_extended_amt,
 			0 AS sr_extended_amt,
-			WorkorderDetailunit.extended_price AS total_extended_amt,
+			CASE WHEN (@fixed_price_flag = 'T' AND WorkorderDetail.print_on_invoice_flag = 'T' ) THEN 0 ELSE  WorkorderDetailunit.extended_price END AS total_extended_amt,
 			0 AS cash_received,
 			ISNULL(WorkorderDetail.manifest,'') AS manifest,
 			manifest_flag = CASE WHEN WorkorderDetail.manifest IS NULL THEN '' ELSE 'M' END,
@@ -2492,8 +2498,8 @@ BEGIN
 		LEFT OUTER JOIN CustomerBilling ON WorkorderHeader.customer_id = CustomerBilling.customer_id
 			AND WorkorderHeader.billing_project_id = CustomerBilling.billing_project_id
 		LEFT OUTER JOIN Generator ON WorkorderHeader.generator_id = Generator.generator_id
-		WHERE (WorkorderHeader.fixed_price_flag = 'F' OR WorkorderHeader.fixed_price_flag IS NULL)
-		AND WorkorderDetail.resource_type = 'D'
+		WHERE /*(WorkorderHeader.fixed_price_flag = 'F' OR WorkorderHeader.fixed_price_flag IS NULL)
+		AND*/ WorkorderDetail.resource_type = 'D'
 		AND WorkOrderDetailUnit.billing_flag = 'T'
 		AND WorkOrderDetailUnit.quantity > 0
 		AND WorkorderHeader.company_id = @company_id
@@ -2624,7 +2630,7 @@ BEGIN
 				b.profit_ctr_id AS dist_profit_ctr_id,
 				NULL AS sales_tax_id,
 				NULL AS applied_percent,
-				b.total_extended_amt AS extended_amt,
+				CASE WHEN (@fixed_price_flag = 'T' AND WorkorderDetail.print_on_invoice_flag = 'T' ) THEN 0 ELSE  b.total_extended_amt END AS extended_amt,
 				-- SK 02/20 b.gl_account_code,
 				gl_account_code = dbo.fn_get_workorder_glaccount(WorkOrderHeader.company_id, WorkOrderHeader.profit_ctr_id, WorkOrderHeader.workorder_id, WorkorderDetail.resource_type, WorkorderDetail.sequence_id),
 				NULL AS sequence_id,
@@ -2727,8 +2733,8 @@ BEGIN
 						AND CteWorkOrderTypeDetail.company_id = WorkOrderHeader.company_id
 						AND CteWorkOrderTypeDetail.profit_ctr_id = WorkOrderHeader.profit_ctr_id
 						AND ( CteWorkOrderTypeDetail.customer_id IS NULL OR WorkorderHeader.customer_id = CteWorkOrderTypeDetail.customer_id )
-		WHERE (WorkorderHeader.fixed_price_flag = 'F' OR WorkorderHeader.fixed_price_flag IS NULL)
-			AND WorkorderHeader.workorder_status = 'A'
+		WHERE /*(WorkorderHeader.fixed_price_flag = 'F' OR WorkorderHeader.fixed_price_flag IS NULL)
+			AND*/ WorkorderHeader.workorder_status = 'A'
 			AND (WorkorderHeader.submitted_flag = 'F' OR WorkorderHeader.submitted_flag IS NULL)
 			AND WorkorderHeader.company_id = @company_id
 			AND WorkorderHeader.profit_ctr_id = @profit_ctr_id

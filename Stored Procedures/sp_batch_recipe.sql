@@ -1,4 +1,4 @@
-﻿CREATE PROCEDURE sp_batch_recipe 
+﻿CREATE PROCEDURE [dbo].[sp_batch_recipe] 
 	@company_id		int, 
 	@profit_ctr_id	int,
 	@location		varchar(15), 
@@ -19,77 +19,96 @@ sp_batch_recipe 21,0,'SYSTECH', '91004',2
 sp_batch_recipe 21,0,'702', '23234',4
 sp_batch_recipe 21,0,'702', '23234',4
 sp_batch_recipe 29,0,'T101', '156',3
+
+02/08/2025	KM	US140503, US140504 Rewrote the Stored Procedure to remove the usage of cursor,
+				utilize fn_receipt_weight_container and fn_calculate_gallons,
+				obtain the list of common recipes for all the profiles in the batch,
+				retrieve the aggregated sum of container weight and volume on the batch,
+				enhance the error handling mechanism to show messages relavant to the scenario
 **************************************************************/
 SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
 
-DECLARE @receipt_id int,
-		@line_id int,
-		@container_id int,
-		@recipe_id int,
-		@mix_order_sequence_id int,
-		@reagent_uid int,	
-		@lab_reagent_percentage float,
-		@ret int,
-		@message varchar(500),
-		@no_row int,
-        @debug int = 0,
-        @rowcount int
-        
- SET @message = 'There are multiple profiles in this batch. Please review each one and its associated recipe to determine the treatment recipe for this batch.'
-		
---IF @debug = 1 print 'called with @location: ' + @location + ' @tracking_num: ' + @tracking_num 
-	
-CREATE TABLE #tmp_recipe (
-		location varchar (15),
-		tracking_num	varchar (15),
-		receipt_id	int,
-		line_id int,
-		container_id int,
-		recipe_id int		 
-	)
+DECLARE @message varchar(500),
+        @rowcount int,
+		@profile_recipe_count int
 
-CREATE TABLE #tmp_result (
-		recipe_id int,
-		source_container varchar(40),
-		approval varchar(40),
-		reagent_desc varchar(40),
-		lab_percentage float,
-		mix_order_sequence_id int,
-		calc_amount float,
-		user_calc_amount float ,
-		err_message varchar (100),
-		dummy_total_amount float,
-		gal_dummy_total_amount float
-	)
-	
--- Get the container profile recipe assigned to this batch
-INSERT #tmp_recipe (location, tracking_num, receipt_id, line_id, container_id)
-SELECT distinct  @location,@tracking_num,
-	ContainerDestination.receipt_id,
-	ContainerDestination.line_id,
-	ContainerDestination.container_id
-FROM Receipt (NOLOCK)
-INNER JOIN ContainerDestination (NOLOCK) ON Receipt.company_id = ContainerDestination.company_id
+CREATE TABLE #tmp_profile_base_data
+(company_id int,
+profit_ctr_id int,
+batch_location varchar(100),
+tracking_num varchar(100),
+receipt_id int,
+line_id int,
+profile_id int,
+container_id int,
+sequence_id int,
+container_weight decimal(10, 2),
+container_volume decimal(10, 2))
+
+CREATE TABLE #tmp_recipe_result
+(profile_id int,
+recipe_id int,
+mix_order_sequence_id int,
+step_status char(1),
+reagent_desc varchar(200),
+lab_reagent_percentage decimal(5, 2),
+batch_total_gallons decimal(10, 2),
+batch_total_weight decimal(10, 2))
+
+--Load the Base table for Profile Data
+INSERT #tmp_profile_base_data
+(company_id, profit_ctr_id, batch_location, tracking_num, receipt_id,
+line_id, profile_id, container_id, sequence_id, container_weight)
+SELECT DISTINCT
+ContainerDestination.Company_id,
+ContainerDestination.Profit_ctr_id,
+@location,
+@tracking_num,
+ContainerDestination.Receipt_id,
+ContainerDestination.line_id,
+Receipt.Profile_id,
+ContainerDestination.Container_id,
+ContainerDestination.sequence_id,
+Container.container_weight * (ContainerDestination.container_percent / 100.0)
+from ContainerDestination
+JOIN Receipt (NOLOCK)
+ON Receipt.company_id = ContainerDestination.company_id
 	AND Receipt.profit_ctr_id = ContainerDestination.profit_ctr_id
 	AND Receipt.receipt_id = ContainerDestination.receipt_id
-	--AND Receipt.line_id = ContainerDestination.line_id
-WHERE 1=1
+	AND Receipt.line_id = ContainerDestination.line_id
+INNER JOIN Container (NOLOCK) ON ContainerDestination.company_id = Container.company_id
+	AND ContainerDestination.profit_ctr_id = Container.profit_ctr_id
+	AND ContainerDestination.receipt_id = Container.receipt_id
+	AND ContainerDestination.line_id = Container.line_id
+	AND ContainerDestination.container_id = Container.container_id
+WHERE ContainerDestination.location = @location
+AND ( ContainerDestination.tracking_num = @tracking_num  OR ContainerDestination.tracking_num IS Null )
+AND ( ContainerDestination.cycle <=  @cycle  OR ContainerDestination.cycle IS Null )
+AND ContainerDestination.profit_ctr_id = @profit_ctr_id
+AND ContainerDestination.company_id = @company_id
 AND Receipt.trans_type = 'D'
 AND Receipt.trans_mode = 'I'
 AND Receipt.receipt_status IN ('N','L','U','A')
 AND Receipt.fingerpr_status = 'A'
 AND ContainerDestination.status = 'C'
-AND ContainerDestination.location = @location
-AND ( ContainerDestination.tracking_num = @tracking_num  OR ContainerDestination.tracking_num IS Null )
-AND ( ContainerDestination.cycle <=  @cycle  OR ContainerDestination.cycle IS Null )
-AND ContainerDestination.profit_ctr_id = @profit_ctr_id
-AND ContainerDestination.company_id = @company_id
 UNION
-SELECT DISTINCT @location,@tracking_num,
-    ContainerDestination.receipt_id,
-	ContainerDestination.line_id,
-	ContainerDestination.container_id
+SELECT DISTINCT
+ContainerDestination.Company_id,
+ContainerDestination.Profit_ctr_id,
+@location,
+@tracking_num,
+ContainerDestination.Receipt_id,
+ContainerDestination.line_id,
+0 as Profile_id,
+ContainerDestination.Container_id,
+ContainerDestination.sequence_id,
+Container.container_weight * (ContainerDestination.container_percent / 100.0)
 FROM  ContainerDestination
+INNER JOIN Container ON ContainerDestination.company_id = Container.company_id
+	AND ContainerDestination.profit_ctr_id = Container.profit_ctr_id
+	AND ContainerDestination.receipt_id = Container.receipt_id
+	AND ContainerDestination.line_id = Container.line_id
+	AND ContainerDestination.container_id = Container.container_id
 where  ContainerDestination.status = 'C'
 AND ContainerDestination.location = @location
 AND ( ContainerDestination.tracking_num = @tracking_num   OR ContainerDestination.tracking_num IS Null )
@@ -98,136 +117,91 @@ AND ContainerDestination.profit_ctr_id = @profit_ctr_id
 AND ContainerDestination.company_id = @company_id
 AND ContainerDestination.container_type = 'S'
 
---IF @debug = 1 print 'SELECTING RESULTS'
---IF @debug = 1 SELECT DISTINCT @company_id, @profit_ctr_id, @location, @tracking_num, @receipt_id, @line_id, @container_id FROM #tmp_recipe
+--Update the Weight by calling the fn_receipt_weight_container function
+UPDATE #tmp_profile_base_data
+SET container_weight = dbo.fn_receipt_weight_container(receipt_id, line_id, @profit_ctr_id, @company_id, container_id, sequence_id)
+FROM #tmp_profile_base_data
+WHERE (container_weight IS NULL or container_weight = 0)
 
-DECLARE Approval_Cursor CURSOR FOR
-		SELECT location, tracking_num,  receipt_id, line_id, container_id 
-		FROM #tmp_recipe
-		
-		OPEN Approval_Cursor
-		FETCH NEXT FROM Approval_Cursor INTO @location, @tracking_num, @receipt_id, @line_id, @container_id
-                       
-		WHILE @@FETCH_STATUS = 0
-		BEGIN
-   
-   IF @receipt_id = 0 
-   BEGIN
-     	INSERT INTO  #tmp_result 
-    	SELECT Distinct 
-			  par.recipe_id,
-			  dbo.fn_container_stock(containers.line_id, containers.company_id, containers.profit_ctr_id) as source_container,
-			    '' as approval_code,
-			   null,
-			   null,
-			   null,
-			   null,
-			   null,
-			   null,
-			   null,
-			   null
-			FROM dbo.fn_container_source_receipt(@company_id, @profit_ctr_id, @receipt_id, @line_id , @container_id) containers
-			JOIN Receipt r (nolock)
-				ON r.company_id = @company_id
-				AND r.profit_ctr_id = @profit_ctr_id
-				AND r.receipt_id = containers.receipt_id
-			INNER JOIN ProfileApprovalRecipe par (NOLOCK) ON @profit_ctr_id = par .profit_ctr_id
-				AND r.company_id = par.company_id
-				AND r.profile_id   = par.profile_id
-				AND par.primary_flag = 'Y'
-			INNER JOIN  RecipeDetail rd (NOLOCK) ON rd.profit_ctr_id = par .profit_ctr_id
-				AND rd.company_id = par.company_id
-				AND rd.recipe_id   = par.recipe_id 
-				AND par.primary_flag = 'Y'
+--Update Batch Gallons by calling the fn_calculated_gallons function
+UPDATE #tmp_profile_base_data
+SET container_volume = dbo.fn_calculated_gallons(@company_id, @profit_ctr_id, receipt_id, line_id, container_id, sequence_id)
+FROM #tmp_profile_base_data
 
-				 IF @@ROWCOUNT = 0
-			   BEGIN 
-				 SET @no_row = 99999
-			   END	 
+--JOIN the Base table with Recipe Tables and obtain Recipe Attributes, Insert into #tmp_recipe_result
+INSERT #tmp_recipe_result (profile_id, recipe_id, mix_order_sequence_id, step_status,
+reagent_desc, lab_reagent_percentage)
+SELECT DISTINCT
+Base.profile_id,
+ApprRecipe.recipe_id,
+Detail.mix_order_sequence_id,
+Detail.Step_status,
+Reagent.reagent_desc,
+Detail.lab_reagent_percentage
+FROM #tmp_profile_base_data Base
+JOIN ProfileApprovalRecipe ApprRecipe
+	ON Base.profile_id = ApprRecipe.profile_id
+	AND Base.company_id = ApprRecipe.company_id
+	AND Base.profit_ctr_id = ApprRecipe.profit_ctr_id
+JOIN RecipeDetail Detail
+	ON ApprRecipe.Recipe_id = Detail.Recipe_id
+	AND ApprRecipe.company_id = Detail.company_id
+	AND ApprRecipe.profit_ctr_id = Detail.profit_ctr_id
+JOIN Reagent
+	ON Reagent.Reagent_uid = Detail.Reagent_uid
+
+--Select the Inserted Row Count to show a different error message if the Profiles do have recipes but not the same recipe
+SELECT @profile_recipe_count = @@ROWCOUNT
+
+--Update the Batch Total Gallons by summing up on Batch Location and Tracking Number for Non-Stock Containers
+UPDATE #tmp_recipe_result SET batch_total_gallons =
+(SELECT SUM(container_volume) FROM #tmp_profile_base_data
+WHERE receipt_id <> 0
+GROUP BY batch_location, tracking_num)
+
+--Update the Batch Total Weight by summing up on Batch Location and Tracking Number for Non-Stock Containers
+UPDATE #tmp_recipe_result SET batch_total_weight = 
+(SELECT SUM(container_weight) FROM #tmp_profile_base_data
+WHERE receipt_id <> 0
+GROUP BY batch_location, tracking_num)
+
+--Insert the Results into Recipe Output temp table (The only purpose of this Temp table is to return the ERROR banner
+--message if there are no records for the Output
+SELECT DISTINCT recipe_id, mix_order_sequence_id, step_status, reagent_desc,
+lab_reagent_percentage, batch_total_gallons, batch_total_weight,
+((batch_total_weight*lab_reagent_percentage)/100) as calc_lab_weight,
+0.00 as actual_amt, 'N' as recipe_select, '' as primary_indicator, NULL AS error_message
+INTO #tmp_recipe_output
+FROM #tmp_recipe_result
+WHERE recipe_id in
+(SELECT recipe_id
+FROM #tmp_recipe_result
+GROUP BY recipe_id
+HAVING COUNT(DISTINCT profile_id) = (SELECT COUNT(DISTINCT profile_id) FROM #tmp_recipe_result))
+
+--If there are no records, return an EMPTY row with an Error Message
+IF @@ROWCOUNT = 0
+	BEGIN
+		IF @profile_recipe_count = 0
+			BEGIN
+				SELECT @message = 'There are no Recipes for any of the Profiles in this Batch. Please review each Profile and associate a Recipe with atleast one of them to determine the Treatment Recipe for this Batch.'
+			END
+		ELSE
+			BEGIN
+				SELECT @message = 'The Profiles on the Batch do not have the same Recipe(s) associated with them. Please review each Profile and associate the same Recipe(s) with the Profiles to determine the Treatment Recipe for this Batch.'
+			END
+		SELECT 0, 0, NULL, NULL, 0, 0, 0, 0, 0, NULL, NULL, @message
 	END
-   ELSE
-    BEGIN
-	  	INSERT INTO  #tmp_result 
-		  	SELECT Distinct 
-			  par.recipe_id,
-			  CASE WHEN containers.container_type = 'R' THEN right('00' + convert(varchar(2), containers.company_id), 2) + '-' + right('00' + convert(varchar(2), containers.profit_ctr_id), 2) + '-' + CONVERT(varchar(15),containers.receipt_id) + '-' + CONVERT(varchar(5),containers.line_id) 
-					 ELSE dbo.fn_container_stock(containers.line_id, containers.company_id, containers.profit_ctr_id)
-				END as source_container,
-			   r.approval_code,
-			   '',
-			   null,
-			   null,
-			   null,
-			   null,
-			   null,
-			   null,
-			   null
-			FROM dbo.fn_container_source_receipt(@company_id, @profit_ctr_id, @receipt_id, @line_id , @container_id) containers
-			JOIN Receipt r (nolock)
-				ON r.company_id = @company_id
-				AND r.profit_ctr_id = @profit_ctr_id
-				AND r.receipt_id = @receipt_id
-				--AND r.line_id = containers.line_id
-			INNER JOIN ProfileApprovalRecipe par (NOLOCK) ON r.profit_ctr_id = par .profit_ctr_id
-				AND r.company_id = par.company_id
-				AND r.profile_id  = par.profile_id
-				AND par.primary_flag = 'Y'
-			INNER JOIN  RecipeDetail rd (NOLOCK) ON rd.profit_ctr_id = par .profit_ctr_id
-				AND rd.company_id = par.company_id
-				AND rd.recipe_id   = par.recipe_id 
-				AND par.primary_flag = 'Y'
-				AND rd.step_status <> 'V'
-				-- no recipe
-			  IF @@ROWCOUNT = 0
-			   BEGIN 
-				 SET @no_row = 99999
-			   END	
+ELSE
+	BEGIN
+		SELECT recipe_id, mix_order_sequence_id, step_status, reagent_desc,
+		lab_reagent_percentage, batch_total_gallons, batch_total_weight,
+		calc_lab_weight, actual_amt, recipe_select, primary_indicator, error_message from #tmp_recipe_output
 	END
-            SELECT  @reagent_uid = RecipeDetail.reagent_uid, @lab_reagent_percentage = RecipeDetail.lab_reagent_percentage,
-                    @mix_order_sequence_id =  RecipeDetail.mix_order_sequence_id
-            FROM RecipeDetail 
-            JOIN #tmp_result ON RecipeDetail.recipe_id = #tmp_result.recipe_id 
-            AND company_id = @company_id 
-            AND profit_ctr_id = @profit_ctr_id 
-            
-             UPDATE #tmp_result 
-             SET reagent_desc =  ( Select  reagent_desc from Reagent where reagent_uid = @reagent_uid )
-              
-             UPDATE #tmp_result
-             SET lab_percentage = @lab_reagent_percentage              
-                   
-			FETCH NEXT FROM Approval_Cursor INTO @location, @tracking_num, @receipt_id, @line_id, @container_id
-			
-		END		-- WHILE @@FETCH_STATUS = 0
 
-		CLOSE Approval_Cursor
-		DEALLOCATE Approval_Cursor	
-
-		 SELECT Distinct @ret = count (recipe_id) FROM #tmp_result
-
-		 IF @ret >= 1 AND (@no_row = 99999 ) 
-		    begin
-		    SELECT Distinct 0,null,null,null,null,null,null,null,@message,null,null FROM #tmp_result
-		    end
-		 ELSE IF  @ret = 0
-		 begin
-		    SELECT Distinct 0,null,null,null,null,null,null,null,@message,null,null
-		    end 
-	     ELSE
-	     BEGIn
-		     SELECT Distinct RecipeDetail.recipe_id,null,null,Reagent.reagent_desc,lab_reagent_percentage,
-		            RecipeDetail.mix_order_sequence_id,calc_amount,user_calc_amount,null,null,null
-		     FROM RecipeDetail  
-		     join #tmp_result on #tmp_result.recipe_id = RecipeDetail.recipe_id and RecipeDetail.company_id = @company_id 
-		      and RecipeDetail.profit_ctr_id = @profit_ctr_id  
-		     join Reagent on RecipeDetail.reagent_uid = Reagent.reagent_uid
-		     where RecipeDetail.step_status <> 'V'
-		     ORDER BY RecipeDetail.mix_order_sequence_id
-		     END
 GO
 
 GRANT EXECUTE
     ON OBJECT::[dbo].[sp_batch_recipe] TO [EQAI]
     AS [dbo];
 GO
-

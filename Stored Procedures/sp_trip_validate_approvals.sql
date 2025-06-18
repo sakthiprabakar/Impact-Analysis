@@ -9,6 +9,7 @@ This procedure validates that the approvals on a trip are not expired or not con
 
 11/16/2016 MPM	Created from sp_trip_validate_all 
 				(GEM 40236 û Trip - Display warning message upon saving a new trip if an approval is expired or not confirmed)
+04/02/2025 Umesh DE38463: Trip Dispatch - Need error validation for inactive approvals
 
 sp_trip_validate_approvals 45133, 17, 14
 ***********************************************************************/
@@ -107,7 +108,7 @@ Insert Into #tripvalidationall
 	  AND wo.company_id = @company_id
  	  AND wod.bill_rate <> -2
  	  and pqa.confirm_author is null
-  
+   
 -- return result set
 SELECT @rowcount = COUNT(*) FROM #TripvalidationALL
 IF @rowcount = 0

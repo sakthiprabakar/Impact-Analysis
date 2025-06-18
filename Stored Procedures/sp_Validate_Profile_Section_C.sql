@@ -15,19 +15,16 @@ AS
 
 /* ******************************************************************
 
-	Updated By		: Prabhu
-	Updated On		: 21st Sep 2021
-	Type			: Stored Procedure
-	Object Name		: [sp_Validate_Profile_Section_C]
+	 Updated By			: Divya Bharathi R  
+	 Updated On			: 25th Feb 2025 
+	 Type				: Stored Procedure  
+	 Object Name		: [sp_Validate_Profile_Section_C]
+	 Last Change		: Changed to get the value for DOT_sp_permit_text from DOT_sp_permit_text to manifest_dot_sp_number in Profile Table
+	 Reference Ticket	: DE37954: UAT Bug: Express Renewal > Express Renewal Window is Not Retrieving Valid Candidates for Renewal
+	 Purpose			: Procedure to validate Section C required fields and Update the Status of section
 
-
-	Procedure to validate Section C required fields and Update the Status of section
-
-inputs 
-	
+Inputs 
 	@profile_id
-	
-
 
 Samples:
  EXEC [sp_Validate_Profile_Section_C] @profile_id
@@ -140,7 +137,7 @@ BEGIN
 		)
  
 	SELECT @container_type_other_desc=container_type_other_desc,@container_type_other=container_type_other,
-		   @DOT_sp_permit_text=DOT_sp_permit_text,@DOT_sp_permit_flag=DOT_sp_permit_flag,@frequency_other= shipping_frequency_other ,@frequency =shipping_frequency,
+		   @DOT_sp_permit_text=manifest_dot_sp_number,@DOT_sp_permit_flag=DOT_sp_permit_flag,@frequency_other= shipping_frequency_other ,@frequency =shipping_frequency,
 		   @DOT_inhalation_haz_flag=DOT_inhalation_haz_flag,@DOT_shipping_name=DOT_shipping_name,
 		   @container_type_combination=container_type_combination,@container_type_combination_desc=container_type_combination_desc,@container_type_other=container_type_other,
 		   @container_type_other_desc=container_type_other_desc,@RQ_Flaq=reportable_quantity_flag,@RQ_Reason=RQ_reason,@RQ_threshold=RQ_threshold,@hazmat_flag=hazmat,

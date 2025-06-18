@@ -1,12 +1,13 @@
+
 USE [PLT_AI]
 GO
-/****** Object:  StoredProcedure [dbo].[sp_sfdc_Jobbillingauditaudit_insert]    Script Date: 12/17/2024 9:43:50 AM ******/
+/****** Object:  StoredProcedure [dbo].[sp_sfdc_Jobbillingauditaudit_insert]    Script Date: 2/19/2025 4:22:07 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-ALTER procedure [dbo].[sp_sfdc_Jobbillingauditaudit_insert]
+CREATE OR ALTER procedure [dbo].[sp_sfdc_Jobbillingauditaudit_insert]
 						@break_code_1 char(1),
 						@break_code_2 char(1),
 						@break_code_3 char(1),
@@ -87,7 +88,10 @@ ALTER procedure [dbo].[sp_sfdc_Jobbillingauditaudit_insert]
 						@print_toc_in_inv_attachment_flag char(1),
 						@print_rws_in_inv_attachment_flag char(1),
 						@cbilling_territory_code varchar(8),
-						@salesforce_so_quote_id varchar(15)
+						@salesforce_so_quote_id varchar(15),
+						@release_validation char(1),
+						@po_validation char(1),
+						@link_required_validation char(1)
 					
 						
 
@@ -108,6 +112,7 @@ Devops# 89039  - 06/03/2024 salesforce so quote integaration .
 For example, customer_billing_parameter_count =112, if one parameter newly added means then customer_billing_parameter_count =113,
 if two parameter added then customer_billing_parameter_count =114]
 Rally#US134134 -- Inserting audit records for the customerbillingeirrate into the customeraudit table.
+Rally#US141970 -- Inserting audit records for the customerbillingFRFrate into the customeraudit table.
 
 */				
 								
@@ -128,7 +133,7 @@ Declare
 	@table_name varchar(100),
 	@source_system varchar(100),
 	@date_modified_getdate datetime=getdate(),
-	@po_validation char(1),
+	--@po_validation char(1),
 	@trans_source_R char(1),
 	@ERROR CHAR(1)='N',
 	@ll_doc_len int,
@@ -141,7 +146,12 @@ Declare
 	@eqai_scan_document_type varchar(50)= null,
 	@validation char(1),
 	@use_corporate_rate char(1), --nagaraj m
-	@apply_fee_flag char(1)
+	@apply_fee_flag char(1),
+	@customer_billing_frf_rate_uid int,
+	@exemption_approved_by varchar(10),
+	@date_exempted datetime
+
+
 	BEGIN TRY
 	BEGIN
 		Select @source_system = 'sp_sfdc_Jobbillingauditaudit_insert'
@@ -750,7 +760,7 @@ Declare
 
 			
 
-			if @PO_required_flag ='T'
+			/*if @PO_required_flag ='T'
 			BEGIN
 			SELECT @po_validation='E'
 			END
@@ -758,7 +768,7 @@ Declare
 			BEGIN
 			SELECT @po_validation='W'
 			END
-
+			*/
 			if @li_count=56
 			BEGIN
 				SELECT @column_value=@po_validation 
@@ -821,13 +831,37 @@ Declare
 				trim(str(@customer_id)) +' billing project id: '
 				+ trim(str(@billing_project_id))
 			END
-				
-			select @customerbillingeirrate_uid=customerbillingeirrate_uid
+	
+			if @li_count=61
+			BEGIN
+				SELECT @column_value=@release_validation 
+				SELECT @column_name='release_validation'
+				select @table_name='customerbilling'
+					Select @audit_reference = 'customer_id: '  
+				+trim(str(@customer_id)) 
+				+' billing project id: ' 
+				+ trim(str(@billing_project_id))
+			END
+
+			if @li_count=62
+			BEGIN
+				SELECT @column_value=@link_required_validation 
+				SELECT @column_name='link_required_validation'
+				select @table_name='customerbilling'
+					Select @audit_reference = 'customer_id: '  
+				+trim(str(@customer_id)) 
+				+' billing project id: ' 
+				+ trim(str(@billing_project_id))
+			END
+	
+			
+
+			/*select @customerbillingeirrate_uid=customerbillingeirrate_uid
 			from CustomerBillingEIRRate
 			where billing_project_id=@billing_project_id
 			and customer_id=@customer_id
 					
-			/*if @li_count=61
+			if @li_count=61
 			BEGIN
 				SELECT @column_value=@use_corporate_rate_EIRRATE
 				SELECT @column_name='use_corporate_rate'
@@ -1129,43 +1163,121 @@ Declare
 	Begin	
 		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
 		select @customer_id,'CustomerBillingEIRRate','customerbillingeirrate_uid','inserted',trim(str(@customerbillingeirrate_uid)),
-		trim(str(@customerbillingeirrate_uid)) +'customer_id:' +trim(str(@customer_id)) +'billing_project_id:' +trim(str(@billing_project_id)),
-		getdate(),'Salesforce',getdate()
+		'customerbillingeirrate_uid ' + trim(str(@customerbillingeirrate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
 
 		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
 		select @customer_id,'CustomerBillingEIRRate','customer_id','inserted',trim(str(@customer_id)),
-		trim(str(@customerbillingeirrate_uid)) +'customer_id:' +trim(str(@customer_id)) +'billing_project_id:' +trim(str(@billing_project_id)),
-		getdate(),'Salesforce',getdate()
+		'customerbillingeirrate_uid ' + trim(str(@customerbillingeirrate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
 
 		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
 		select @customer_id,'CustomerBillingEIRRate','billing_project_id','inserted',trim(str(@billing_project_id)),
-		trim(str(@customerbillingeirrate_uid)) +'customer_id:' +trim(str(@customer_id)) +'billing_project_id:' +trim(str(@billing_project_id)),
-		getdate(),'Salesforce',getdate()
+		'customerbillingeirrate_uid ' + trim(str(@customerbillingeirrate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
 
 		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
 		select @customer_id,'CustomerBillingEIRRate','use_corporate_rate','inserted',(@use_corporate_rate),
-		trim(str(@customerbillingeirrate_uid)) +'customer_id:' +trim(str(@customer_id)) +'billing_project_id:' +trim(str(@billing_project_id)),
-		getdate(),'Salesforce',getdate()
+		'customerbillingeirrate_uid ' + trim(str(@customerbillingeirrate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
 
 		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
 		select @customer_id,'CustomerBillingEIRRate','eir_rate','inserted',trim(str(@eir_rate)),
-		trim(str(@customerbillingeirrate_uid)) +'customer_id:' +trim(str(@customer_id)) +'billing_project_id:' +trim(str(@billing_project_id)),
-		getdate(),'Salesforce',getdate()
+		'customerbillingeirrate_uid ' + trim(str(@customerbillingeirrate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
 
 		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
 		select @customer_id,'CustomerBillingEIRRate','date_effective','inserted',CONVERT(varchar,@date_effective,101),
-		trim(str(@customerbillingeirrate_uid)) +'customer_id:' +trim(str(@customer_id)) +'billing_project_id:' +trim(str(@billing_project_id)),
-		getdate(),'Salesforce',getdate()
+		'customerbillingeirrate_uid ' + trim(str(@customerbillingeirrate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
 
 		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
 		select @customer_id,'CustomerBillingEIRRate','apply_fee_flag','inserted',trim(@apply_fee_flag),
-		trim(str(@customerbillingeirrate_uid)) +'customer_id:' +trim(str(@customer_id)) +'billing_project_id:' +trim(str(@billing_project_id)),
-		getdate(),'Salesforce',getdate()
+		'customerbillingeirrate_uid ' + trim(str(@customerbillingeirrate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
 
 		fetch next from sf_CustomerbillingEIRRATE into @customerbillingeirrate_uid,@customer_id,@billing_project_id,@use_corporate_rate,@eir_rate,@date_effective,@apply_fee_flag
 		End
 		Close sf_CustomerbillingEIRRATE
 		DEALLOCATE sf_CustomerbillingEIRRATE 
+
+		
+		--CustomerbillingFRFRATE
+
+		declare Sf_CustomerbillingFRFRATE CURSOR fast_forward for select customer_billing_frf_rate_uid,customer_id,billing_project_id,date_effective,apply_fee_flag,exemption_approved_by,date_exempted
+		from CustomerBillingFRFRate where customer_id=@customer_id and billing_project_id=@billing_project_id
+
+		--select @customer_billing_frf_rate_uid
+
+	open Sf_CustomerbillingFRFRATE
+	fetch next from Sf_CustomerbillingFRFRATE into @customer_billing_frf_rate_uid,@customer_id,@billing_project_id,@date_effective,@apply_fee_flag,@exemption_approved_by,@date_exempted
+	While @@fetch_status=0
+	Begin	
+		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
+		select @customer_id,'CustomerBillingFRFRate','customer_billing_frf_rate_uid','inserted',trim(str(@customer_billing_frf_rate_uid)),
+		'customer_billing_frf_rate_uid: ' +trim(str(@customer_billing_frf_rate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
+
+		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
+		select @customer_id,'CustomerBillingFRFRate','customer_id','inserted',trim(str(@customer_id)),
+		'customer_billing_frf_rate_uid: ' +trim(str(@customer_billing_frf_rate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
+		
+
+		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
+		select @customer_id,'CustomerBillingFRFRate','billing_project_id','inserted',trim(str(@billing_project_id)),
+		'customer_billing_frf_rate_uid: ' +trim(str(@customer_billing_frf_rate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
+
+		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
+		select @customer_id,'CustomerBillingFRFRate','date_effective','inserted',CONVERT(varchar,@date_effective,101),
+		'customer_billing_frf_rate_uid: ' +trim(str(@customer_billing_frf_rate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
+
+		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
+		select @customer_id,'CustomerBillingFRFRate','apply_fee_flag','inserted',trim(@apply_fee_flag),
+		'customer_billing_frf_rate_uid: ' +trim(str(@customer_billing_frf_rate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
+
+		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
+		select @customer_id,'CustomerBillingFRFRate','exemption_approved_by','inserted',trim(@exemption_approved_by),
+		'customer_billing_frf_rate_uid: ' +trim(str(@customer_billing_frf_rate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
+
+		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
+		select @customer_id,'CustomerBillingFRFRate','date_exempted','inserted',CONVERT(varchar,@date_exempted,101),
+		'customer_billing_frf_rate_uid: ' +trim(str(@customer_billing_frf_rate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
+
+		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
+		select @customer_id,'CustomerBillingFRFRate','added_by','inserted',@user_code,
+		'customer_billing_frf_rate_uid: ' +trim(str(@customer_billing_frf_rate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
+
+		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
+		select @customer_id,'CustomerBillingFRFRate','date_Added','inserted',getdate(),
+		'customer_billing_frf_rate_uid: ' +trim(str(@customer_billing_frf_rate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
+
+			insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
+		select @customer_id,'CustomerBillingFRFRate','modified_by','inserted',@user_code,
+		'customer_billing_frf_rate_uid: ' +trim(str(@customer_billing_frf_rate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
+
+		insert into customeraudit (customer_id,table_name,column_name,before_Value,after_Value,audit_reference,modified_by,modified_from,date_modified)
+		select @customer_id,'CustomerBillingFRFRate','date_modified','inserted',getdate(),
+		'customer_billing_frf_rate_uid: ' +trim(str(@customer_billing_frf_rate_uid)) +' customer_id: ' +trim(str(@customer_id)) +' billing_project_id: ' +trim(str(@billing_project_id)),
+		@user_code,'Salesforce',getdate()
+		
+		fetch next from Sf_CustomerbillingFRFRATE into @customer_billing_frf_rate_uid,@customer_id,@billing_project_id,@date_effective,@apply_fee_flag,@exemption_approved_by,@date_exempted
+		End
+		Close Sf_CustomerbillingFRFRATE
+		DEALLOCATE Sf_CustomerbillingFRFRATE 
+	
+		
+
+	
+
 
 
 --customerbillingdocument
@@ -1372,13 +1484,7 @@ IF @ERROR ='N'
 END
 
 
-GO
-
-
-
-
-GO
-
+Go
 
 GRANT EXECUTE ON OBJECT::[dbo].[sp_sfdc_Jobbillingauditaudit_insert] TO EQAI  
 GO

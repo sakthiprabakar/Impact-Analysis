@@ -1,4 +1,7 @@
-﻿create procedure [dbo].[sp_labpack_sync_upload_tsdfapprovalconstituent]
+use Plt_ai
+go
+
+alter procedure [dbo].[sp_labpack_sync_upload_tsdfapprovalconstituent]
 	@trip_sync_upload_id	int,
 	@TSDF_approval_id		int,
 	@company_id				int,
@@ -14,6 +17,7 @@ as
  loads to Plt_ai
  
  12/17/2019 - rwb created
+ 05/21/2025 - rwb CHG0080813 Remove rowguid from the insert, it is being removed from the table
 
 ****************************************************************************************/
 
@@ -36,8 +40,7 @@ set @sql = 'insert TSDFApprovalConstituent ('
 + ', added_by'
 + ', date_added'
 + ', modified_by'
-+ ', date_modified'
-+ ', rowguid)'
++ ', date_modified)'
 + ' values (' + convert(varchar(20),@TSDF_approval_id)
 + ', ' + convert(varchar(20),@company_id)
 + ', ' + convert(varchar(20),@profit_ctr_id)
@@ -48,8 +51,7 @@ set @sql = 'insert TSDFApprovalConstituent ('
 + ', ''' + @user + ''''
 + ', getdate()'
 + ', ''' + @user + ''''
-+ ', getdate()'
-+ ', newid())'
++ ', getdate())'
 
 select @sql_sequence_id = max(sequence_id) + 1
 from TripSyncuploadSQL
@@ -73,3 +75,4 @@ return 0
 ON_ERROR:
 raiserror(@msg,18,-1) with seterror
 return -1
+go

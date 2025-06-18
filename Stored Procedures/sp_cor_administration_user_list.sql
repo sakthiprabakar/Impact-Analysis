@@ -3,44 +3,45 @@ GO
 DROP PROCEDURE IF EXISTS [sp_cor_administration_user_list]
 GO
 
-CREATE proc [dbo].[sp_cor_administration_user_list] (
-	@web_userid varchar(100)
-	, @role		varchar(max) = null
-	, @search	varchar(100) = null
-	, @sort				varchar(20) = '' -- 'Workorder Number','Store Number','Schedule Type','Service Type','Requested Date','Scheduled Date','Service Date','Manifest Number','Status', 'Contact Company'
-	, @page				bigint = 1
-	, @perpage			bigint = 20 
-	, @customer_id_list varchar(max)=''  /* Added 2019-07-11 by AA */
-	, @generator_id_list varchar(max)=''  /* Added 2019-07-11 by AA */
-    , @active_flag	char(1) = 'A'	/* 'A'ctive users, 'I'nactive users, 'X' all users.   */
-	, @search_type nvarchar(100) = ''
-	, @search_contact_id int = 0
-	, @search_name nvarchar(200) = ''
-	, @search_email nvarchar(150) = ''
-	, @search_first_name nvarchar(100) = ''
-	, @search_last_name nvarchar(100) = ''
-	, @search_title nvarchar(150) = ''
-	, @search_phone nvarchar(20) = ''
-	, @search_fax nvarchar(20) = ''
-	, @search_contact_country nvarchar(100) = ''
-	, @search_contact_zip_code nvarchar(100) = ''
-	, @search_contact_state nvarchar(100) = ''
-	, @search_contact_addr1 nvarchar(100) = ''
-	, @search_contact_city nvarchar(100) = ''
-	, @search_contact_company nvarchar(150) = ''
-	, @search_contact_addr2 nvarchar(100) = ''
-	, @search_contact_addr3 nvarchar(100) = ''
-	, @search_contact_addr4 nvarchar(100) = ''
-	, @search_mobile nvarchar(100) = ''
-	, @search_web_userid nvarchar(150) = ''
+CREATE PROCEDURE [dbo].[sp_cor_administration_user_list](
+    @web_userid varchar(100),
+    @role varchar(500) = null,    -- Changed from MAX to 500
+    @search varchar(100) = null,
+    @sort varchar(20) = '', -- 'Workorder Number','Store Number','Schedule Type','Service Type','Requested Date','Scheduled Date','Service Date','Manifest Number','Status', 'Contact Company'
+    @page bigint = 1,
+    @perpage bigint = 20,
+    @customer_id_list varchar(500) = '',  -- Changed from MAX to 500
+    @generator_id_list varchar(500) = '',  -- Changed from MAX to 500
+    @active_flag char(1) = 'A', -- 'A'ctive users, 'I'nactive users, 'X' all users.
+    @search_type varchar(100) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_contact_id int = 0,
+    @search_name varchar(200) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_email varchar(150) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_first_name varchar(100) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_last_name varchar(100) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_title varchar(150) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_phone varchar(20) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_fax varchar(20) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_contact_country varchar(100) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_contact_zip_code varchar(100) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_contact_state varchar(100) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_contact_addr1 varchar(100) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_contact_city varchar(100) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_contact_company varchar(150) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_contact_addr2 varchar(100) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_contact_addr3 varchar(100) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_contact_addr4 varchar(100) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_mobile varchar(100) = '',    -- Changed from NVARCHAR to VARCHAR
+    @search_web_userid varchar(150) = ''    -- Changed from NVARCHAR to VARCHAR
 )
-as
+AS
 /* *****************************************************************
-sp_cor_administration_user_list 
+sp_cor_administration_user_list
 
 List the users that the current @web_userid can admin.
 
-sp_cor_administration_user_list 
+--sp_cor_administration_user_list
+EXEC dbo.sp_cor_administration_user_list_v2
 	@web_userid = 'iceman'
 	, @role = '' -- 'Administration'
 	, @search = '' -- 'bram'
@@ -69,7 +70,7 @@ delete FROM    contactxrole WHERE contact_id = 211277 and roleid = '6ED53B5D-588
 select * from contact where web_userid = 'yhudspeth'
 update contact set web_userid = isnull(web_userid, '') + '_' + convert(varchar(20), contact_id) where web_userid = 'yhudspeth' and contact_id <> 257568
 
-sp_cor_administration_user_account_change 
+sp_cor_administration_user_account_change
 	@web_userid = 'nyswyn100'
 	, @target_userid = 'yhudspeth'
 	, @operation = 'add'
@@ -79,224 +80,299 @@ select * from	contactxref where	 contact_id = 257568
 
 exec [dbo].[sp_contact_account_access_change] @user_code_or_id = 'nyswyn100'	, @target_contact_id	= 257568, @operation	= 'add' , @account_type	= 'C', @account_id	= 6976
 
-sp_cor_administration_user_account_change 
+sp_cor_administration_user_account_change
 	@web_userid = 'nyswyn100'
 	, @target_userid = 'yhudspeth'
 	, @operation = 'add'
 	, @account_type = 'C'
 	, @account_id = 15551
 	
-	
+History:
+	04/28/2025 - Rally TA544844/TA556928 - Titian Modified to optimize the stored procedure as per the recommendations provided in the analysis document for Titan.
+
 ***************************************************************** */
 
-    
 -- Avoid query plan caching and handle nulls
-	declare 
-	@i_web_userid	varchar(100) = isnull(@web_userid, '')
-	, @i_role		varchar(max) = isnull(@role, '')
-	, @i_search		varchar(100) = isnull(@search, '')
-	, @i_sort		varchar(20) = isnull(@sort, '')
-	, @i_page		bigint = isnull(@page, 1 )
-	, @i_perpage	bigint = isnull(@perpage, 20)
-	, @i_customer_id_list varchar(max) = isnull(@customer_id_list, '')
-	, @i_generator_id_list varchar(max) = isnull(@generator_id_list, '')
-	, @i_active_flag char(1) = isnull(@active_flag, 'A')
-	, @i_am_I_internal int = 0
-	, @i_contact_id int = 0
+DECLARE
+    @i_web_userid varchar(100) = ISNULL(@web_userid, ''),
+    @i_role varchar(500) = ISNULL(@role, ''),    -- Changed from MAX to 500
+    @i_search varchar(100) = ISNULL(@search, ''),
+    @i_sort varchar(20) = ISNULL(@sort, ''),
+    @i_page bigint = ISNULL(@page, 1),
+    @i_perpage bigint = ISNULL(@perpage, 20),
+    @i_customer_id_list varchar(500) = ISNULL(@customer_id_list, ''),    -- Changed from MAX to 500
+    @i_generator_id_list varchar(500) = ISNULL(@generator_id_list, ''),    -- Changed from MAX to 500
+    @i_active_flag char(1) = ISNULL(@active_flag, 'A'),
+    @i_am_I_internal int = 0,
+    @i_contact_id int = 0;
 
-select top 1 @i_contact_id = contact_id from CORcontact WHERE web_userid = @i_web_userid
+-- Create a temp table for split role values
+IF OBJECT_ID('tempdb..#troles') IS NOT NULL
+    DROP TABLE #troles;
 
-	
-select @i_am_I_internal = 1
-from ContactXRole x
-join cor_db.[dbo].[RolesRef] r
-	on x.RoleId = r.RoleID
-join Contact c on x.contact_id = c.contact_id
-	and c.web_userid = @i_web_userid
-where r.RoleName like '%internal%'
+CREATE TABLE #troles (
+    rolename varchar(150)
+);
 
+IF @i_role <> ''
+    INSERT INTO #troles
+    SELECT row
+    FROM dbo.fn_SplitXsvText(',', 1, @i_role)
+    WHERE row IS NOT NULL;
 
-declare @troles table (
-	rolename	varchar(150)
+SELECT @i_contact_id = contact_id
+FROM dbo.CORcontact
+WHERE web_userid = @i_web_userid;
+
+--The logic for @i_am_I_internal is hidden
+/*SELECT @i_am_I_internal = 1
+FROM dbo.ContactXRole x
+JOIN cor_db.[dbo].[RolesRef] r ON x.RoleId = r.RoleID
+JOIN dbo.Contact c ON x.contact_id = c.contact_id AND c.web_userid = @i_web_userid
+WHERE r.RoleName LIKE '%internal%';  */
+
+-- Create temp table for internal domains
+IF OBJECT_ID('tempdb..#internal_domains') IS NOT NULL
+    DROP TABLE #internal_domains;
+
+CREATE TABLE #internal_domains (
+    domain varchar(40)
+);
+
+INSERT INTO #internal_domains (domain)
+VALUES
+    ('@usecology.com'),
+    ('@stablex.com'),
+    ('@eqonline.com'),
+    ('@nrcc.com'),
+    ('@optisolbusiness.com');
+    --.('@repsrv.com');
+
+-- Create temp tables for customer and generator IDs
+IF OBJECT_ID('tempdb..#customer_ids') IS NOT NULL
+    DROP TABLE #customer_ids;
+
+CREATE TABLE #customer_ids (
+    customer_id int
+);
+
+IF @i_customer_id_list <> ''
+BEGIN
+    INSERT INTO #customer_ids (customer_id)
+    SELECT CONVERT(int, row)
+    FROM dbo.fn_SplitXsvText(',', 1, @i_customer_id_list)
+    WHERE row IS NOT NULL AND ISNUMERIC(row) = 1;
+END
+
+IF OBJECT_ID('tempdb..#generator_ids') IS NOT NULL
+    DROP TABLE #generator_ids;
+
+CREATE TABLE #generator_ids (
+    generator_id int
+);
+
+IF @i_generator_id_list <> ''
+BEGIN
+    INSERT INTO #generator_ids (generator_id)
+    SELECT CONVERT(int, row)
+    FROM dbo.fn_SplitXsvText(',', 1, @i_generator_id_list)
+    WHERE row IS NOT NULL AND ISNUMERIC(row) = 1;
+END
+
+-- Create a temp table for contact_ids with access
+IF OBJECT_ID('tempdb..#contact_access') IS NOT NULL
+    DROP TABLE #contact_access;
+
+CREATE TABLE #contact_access (
+    contact_id int,
+    customer_id int,
+    generator_id int
+);
+
+INSERT INTO #contact_access (contact_id, customer_id, generator_id)
+SELECT x1.contact_id, x1.customer_id, x1.generator_id
+FROM dbo.contactxref x1
+WHERE x1.contact_id = @i_contact_id
+AND x1.status = 'A'
+AND x1.web_access = 'A';
+
+-- Create a temp table instead of table variable for better statistics
+IF OBJECT_ID('tempdb..#contactxref') IS NOT NULL
+    DROP TABLE #contactxref;
+
+CREATE TABLE #contactxref (
+    contact_id bigint,
+    type char(1),
+    web_access char(1),
+    type_count int
+);
+
+-- Add index to temp table
+CREATE CLUSTERED INDEX IX_contactxref_contact_id ON #contactxref (contact_id);
+
+INSERT INTO #contactxref
+SELECT
+    x.contact_id,
+    MIN(x.type) AS type,
+    MIN(x.web_access) AS web_access,
+    COUNT(DISTINCT x.type) AS type_count
+FROM dbo.contactxref x
+JOIN dbo.contact c ON x.contact_id = c.contact_id
+LEFT JOIN #internal_domains id ON c.email LIKE '%' + id.domain AND c.email <> 'itcommunications@usecology.com'
+WHERE
+    x.status = 'A'
+    AND (
+        EXISTS (
+            SELECT 1
+            FROM #contact_access ca
+            WHERE (ca.customer_id = x.customer_id OR ca.generator_id = x.generator_id)
+            AND (x.customer_id IS NOT NULL OR x.generator_id IS NOT NULL)
+        )
+    )
+    AND (
+        @i_customer_id_list = ''
+        OR (
+            @i_customer_id_list <> ''
+            AND x.type = 'C'
+            AND EXISTS (
+                SELECT 1
+                FROM #customer_ids ci
+                WHERE ci.customer_id = x.customer_id
+            )
+        )
+    )
+    AND (
+        @i_generator_id_list = ''
+        OR (
+            @i_generator_id_list <> ''
+            AND x.type = 'G'
+            AND EXISTS (
+                SELECT 1
+                FROM #generator_ids gi
+                WHERE gi.generator_id = x.generator_id
+            )
+        )
+    )
+    -- Removed Internal User check as it's not useful according to requirements
+    AND id.domain IS NULL
+GROUP BY x.contact_id;
+
+-- Using CTE for better performance with complex filtering
+WITH FilteredContacts AS (
+    SELECT DISTINCT
+        CASE WHEN x.type_count = 2 THEN 'Both' ELSE CASE x.type WHEN 'C' THEN 'Customer' ELSE 'Generator' END END AS type,
+        c.contact_id, c.name, c.email, c.first_name, c.last_name, c.title, c.phone, c.fax,
+        c.contact_country, c.contact_zip_code, c.contact_state, c.contact_addr1, c.contact_city, c.contact_company,
+        c.contact_addr2, c.contact_addr3, c.contact_addr4, c.mobile, c.web_userid,
+        x.web_access AS status,
+        CASE WHEN c.email LIKE '%usecology.com%' OR c.email LIKE '%republicservices.com%' THEN 1 ELSE 0 END AS IsInternalUser
+    FROM dbo.contact c
+    JOIN #contactxref x ON c.contact_id = x.contact_id
+    JOIN dbo.contactxref xref ON c.contact_id = xref.contact_id
+    WHERE x.type = 'C'
+    AND x.web_access = CASE @i_active_flag WHEN 'X' THEN x.web_access ELSE @i_active_flag END
+    AND c.contact_status = 'A'
+    AND (c.web_userid IS NOT NULL AND c.web_userid <> '')
+    AND (
+        @i_role = ''
+        OR (
+            @i_role <> ''
+            AND EXISTS (
+                SELECT 1
+                FROM cor_db.dbo.RolesRef rr WITH (NOLOCK)
+                JOIN dbo.ContactXRole cxr WITH (NOLOCK) ON rr.roleid = cxr.RoleId
+                JOIN #troles t ON rr.rolename = t.rolename
+                WHERE cxr.contact_id = c.contact_id
+                AND cxr.status = CASE @i_active_flag WHEN 'A' THEN 'A' ELSE cxr.status END
+            )
+        )
+    )
+    AND (
+        @i_search = ''
+        OR (
+            @i_search <> ''
+            AND ' ' + ISNULL(CONVERT(varchar(20), c.contact_id), '') +
+                ' ' + ISNULL(c.name, '') +
+                ' ' + ISNULL(c.email, '') +
+                ' ' + ISNULL(c.first_name, '') +
+                ' ' + ISNULL(c.last_name, '') +
+                ' ' + ISNULL(c.title, '') +
+                ' ' + ISNULL(c.phone, '') +
+                ' ' + ISNULL(c.contact_city, '') +
+                ' ' + ISNULL(c.contact_company, '') +
+                ' ' + ISNULL(c.web_userid, '') + ' '
+                LIKE '%' + @i_search + '%'
+        )
+    )
+    AND (@search_type = '' OR
+        CASE WHEN x.type_count = 2 THEN 'Both' ELSE CASE x.type WHEN 'C' THEN 'Customer' ELSE 'Generator' END END = @search_type)
+    AND (@search_contact_id = 0 OR c.contact_id = @search_contact_id)
+    AND (COALESCE(c.name, '') LIKE '%' + @search_name + '%')
+    AND (COALESCE(c.email, '') LIKE '%' + @search_email + '%')
+    AND (COALESCE(c.first_name, '') LIKE '%' + @search_first_name + '%')
+    AND (COALESCE(c.last_name, '') LIKE '%' + @search_last_name + '%')
+    AND (COALESCE(c.title, '') LIKE '%' + @search_title + '%')
+    AND (COALESCE(c.phone, '') LIKE '%' + @search_phone + '%')
+    AND (COALESCE(c.fax, '') LIKE '%' + @search_fax + '%')
+    AND (COALESCE(c.contact_country, '') LIKE '%' + @search_contact_country + '%')
+    AND (COALESCE(c.contact_zip_code, '') LIKE '%' + @search_contact_zip_code + '%')
+    AND (COALESCE(c.contact_state, '') LIKE '%' + @search_contact_state + '%')
+    AND (COALESCE(c.contact_addr1, '') LIKE '%' + @search_contact_addr1 + '%')
+    AND (COALESCE(c.contact_city, '') LIKE '%' + @search_contact_city + '%')
+    AND (COALESCE(c.contact_company, '') LIKE '%' + @search_contact_company + '%')
+    AND (COALESCE(c.contact_addr2, '') LIKE '%' + @search_contact_addr2 + '%')
+    AND (COALESCE(c.contact_addr3, '') LIKE '%' + @search_contact_addr3 + '%')
+    AND (COALESCE(c.contact_addr4, '') LIKE '%' + @search_contact_addr4 + '%')
+    AND (COALESCE(c.mobile, '') LIKE '%' + @search_mobile + '%')
+    AND (COALESCE(c.web_userid, '') LIKE '%' + @search_web_userid + '%')
+),
+RankedContacts AS (
+    SELECT
+        type, contact_id, name, email, first_name, last_name, title, phone, fax,
+        contact_country, contact_zip_code, contact_state, contact_addr1, contact_city,
+        contact_company, contact_addr2, contact_addr3, contact_addr4, mobile, web_userid,
+        status, IsInternalUser,
+        ROW_NUMBER() OVER (ORDER BY
+            CASE WHEN @i_sort IN ('', 'name') THEN name ELSE NULL END,
+            CASE WHEN @i_sort = 'email' THEN email ELSE NULL END,
+            CASE WHEN @i_sort = 'first_name' THEN first_name ELSE NULL END,
+            CASE WHEN @i_sort = 'last_name' THEN last_name ELSE NULL END,
+            CASE WHEN @i_sort = 'title' THEN title ELSE NULL END,
+            CASE WHEN @i_sort = 'phone' THEN phone ELSE NULL END,
+            CASE WHEN @i_sort = 'address' THEN contact_addr1 ELSE NULL END,
+            CASE WHEN @i_sort = 'city' THEN contact_city ELSE NULL END,
+            CASE WHEN @i_sort = 'state' THEN contact_state ELSE NULL END,
+            CASE WHEN @i_sort = 'contact_company' THEN contact_company ELSE NULL END
+        ) AS _row
+    FROM FilteredContacts
 )
-if @i_role <> ''
-insert @troles
-select row from dbo.fn_SplitXsvText(',',1,@i_role)
-where row is not null
+SELECT
+    type, contact_id, name, email, first_name, last_name, title, phone, fax,
+    contact_country, contact_zip_code, contact_state, contact_addr1, contact_city,
+    contact_company, contact_addr2, contact_addr3, contact_addr4, mobile, web_userid,
+    status, IsInternalUser, _row
+FROM RankedContacts
+WHERE _row BETWEEN ((@i_page-1) * @i_perpage) + 1 AND (@i_page * @i_perpage)
+ORDER BY _row;
 
-declare @internal_domains table (
-	domain		varchar(40)
-)
-insert @internal_domains (domain)
-select '@usecology.com'
-union
-select '@stablex.com'
-union
-select '@eqonline.com'
-union
-select '@nrcc.com'
-union
-select '@optisolbusiness.com'
+-- Clean up temporary objects
+IF OBJECT_ID('tempdb..#contactxref') IS NOT NULL
+    DROP TABLE #contactxref;
+IF OBJECT_ID('tempdb..#troles') IS NOT NULL
+    DROP TABLE #troles;
+IF OBJECT_ID('tempdb..#internal_domains') IS NOT NULL
+    DROP TABLE #internal_domains;
+IF OBJECT_ID('tempdb..#customer_ids') IS NOT NULL
+    DROP TABLE #customer_ids;
+IF OBJECT_ID('tempdb..#generator_ids') IS NOT NULL
+    DROP TABLE #generator_ids;
+IF OBJECT_ID('tempdb..#contact_access') IS NOT NULL
+    DROP TABLE #contact_access;
 
-declare @contactxref table (
-	contact_id		bigint
-	, type			char(1)
-	, web_access	char(1)
-	, type_count	int
-)
-
-insert @contactxref
-select x.contact_id, min(x.type) type, min(x.web_access) web_access, count(distinct x.type) as type_count
-from contactxref x
-join contact c on x.contact_id = c.contact_id
-LEFT JOIN @internal_domains id 
-	on c.email like '%' + id.domain
-	and c.email <> 'itcommunications@usecology.com'
-WHERE x.status = 'A'
-and (	
-	(
-		isnull(x.customer_id, -999) in (
-			select x1.customer_id
-			from contactxref x1
-			WHERE x1.contact_id = @i_contact_id
-			and x1.status = 'A'
-			and x1.web_access = 'A'
-			-- and this user is in the admin role for this customer
-		)
-	)
-	or
-	(
-		isnull(x.generator_id, -999) in (
-			select x1.generator_id
-			from contactxref x1
-			WHERE x1.contact_id = @i_contact_id
-			and x1.status = 'A'
-			and x1.web_access = 'A'
-			-- and this user is in the admin role for this customer
-		)
-	)
-)
-		and (
-			@i_customer_id_list = ''
-			or (
-				@i_customer_id_list <> ''
-				and x.type = 'C'
-				and x.customer_id in (select convert(int, row) from dbo.fn_SplitXsvText(',', 1, @i_customer_id_list) where row is not null and isnumeric(row) = 1)
-			)
-		)
-		and (
-			@i_generator_id_list = ''
-			or (
-				@i_generator_id_list <> ''
-				and x.type = 'G'
-				and x.generator_id in (select convert(int, row) from dbo.fn_SplitXsvText(',', 1, @i_generator_id_list) where row is not null and isnumeric(row) = 1)
-			)
-		)
-		and not exists (
-			select top 1 1
-			from cor_db..RolesRef rr (nolock) 
-			join ContactXRole cxr (nolock) on rr.roleid = cxr.RoleId
-			WHERE cxr.contact_id = x.contact_id
-			and cxr.status = 'A'
-			and rr.RoleName = 'Internal User'
-			and @i_am_I_internal = 0
-		)
-		and id.domain is null
-GROUP BY x.contact_id
-
-select * from (
-	select x.*
-		,_row = row_number() over (order by 
-			case when @i_sort in ('', 'name') then x.name end,
-			case when @i_sort = 'email' then x.email end,
-			case when @i_sort = 'first_name' then x.first_name end,
-			case when @i_sort = 'last_name' then x.last_name end,
-			case when @i_sort = 'title' then x.title end, 
-			case when @i_sort = 'phone' then x.phone end,
-			case when @i_sort = 'address' then x.contact_addr1 end, 
-			case when @i_sort = 'city' then x.contact_city end, 
-			case when @i_sort = 'state' then x.contact_state end,
-			case when @i_sort = 'contact_company' then x.contact_company end
-		) 
-	from (
-		select distinct
-		case when x.type_count = 2 then 'Both' else case x.type when 'C' then 'Customer' else 'Generator' end end type
-		,c.contact_id, c.name, c.email,c.first_name,c.last_name,c.title,c.phone,c.fax,c.contact_country,c.contact_zip_code,c.contact_state,c.contact_addr1,c.contact_city,c.contact_company,
-		c.contact_addr2, c.contact_addr3, c.contact_addr4, c.mobile
-		, c.web_userid
-		, x.web_access as status
-		,case when c.email like '%usecology.com%' or c.email like '%republicservices.com%' then 1 else 0 end as IsInternalUser
-		from contact c
-		join @contactxref x on c.contact_id = x.contact_id
-		join contactxref xref on c.contact_id = xref.contact_id
-		WHERE x.type = 'C'
-		and x.web_access = case @i_active_flag when 'X' then x.web_access else @i_active_flag end 
-		and c.contact_status = 'A'		
-		and isnull(c.web_userid, '') <> ''
-		and (
-			@i_role = ''
-			or (
-				@i_role <> ''
-				and
-				exists (
-					select top 1 1
-					from cor_db..RolesRef rr (nolock) 
-					join ContactXRole cxr (nolock) on rr.roleid = cxr.RoleId
-					join @troles t on rr.rolename = t.rolename
-					WHERE cxr.contact_id = c.contact_id
-					and cxr.status = case @i_active_flag when 'A' then 'A' else cxr.status end 
-				)
-			)
-		)
-		and (
-			@i_search = ''
-			or (
-				@i_search <> ''
-				and 
-					' ' + isnull(convert(varchar(20),c.contact_id), '') +
-					' ' + isnull(c.name, '') +
-					' ' + isnull(c.email, '') +
-					' ' + isnull(c.first_name, '') +
-					' ' + isnull(c.last_name, '') +
-					' ' + isnull(c.title, '') +
-					' ' + isnull(c.phone, '') +
-					' ' + isnull(c.contact_city, '') +
-					' ' + isnull(c.contact_company, '') +
-					' ' + isnull(c.web_userid, '')
-					+ ' '
-					like '%' + @i_search + '%'
-			)
-		)
-		and (@search_type = '' or case when x.type_count = 2 then 'Both' else case x.type when 'C' then 'Customer' else 'Generator' end end = @search_type) 
-		and (@search_contact_id = 0 or c.contact_id = @search_contact_id)
-		and (isnull(c.name, '') like '%' + @search_name + '%')
-		and (isnull(c.email, '') like '%' + @search_email + '%')
-		and (isnull(c.first_name, '') like '%' + @search_first_name + '%')
-		and (isnull(c.last_name, '') like '%' + @search_last_name + '%')
-		and (isnull(c.title, '') like '%' + @search_title + '%')
-		and (isnull(c.phone, '') like '%' + @search_phone + '%')
-		and (isnull(c.fax, '') like '%' + @search_fax + '%')
-		and (isnull(c.contact_country, '') like '%' + @search_contact_country + '%')
-		and (isnull(c.contact_zip_code, '') like '%' + @search_contact_zip_code + '%')
-		and (isnull(c.contact_state, '') like '%' + @search_contact_state + '%')
-		and (isnull(c.contact_addr1, '') like '%' + @search_contact_addr1 + '%')
-		and (isnull(c.contact_city, '') like '%' + @search_contact_city + '%')
-		and (isnull(c.contact_company, '') like '%' + @search_contact_company + '%')
-		and (isnull(c.contact_addr2, '') like '%' + @search_contact_addr2 + '%')
-		and (isnull(c.contact_addr3, '') like '%' + @search_contact_addr3 + '%')
-		and (isnull(c.contact_addr4, '') like '%' + @search_contact_addr4 + '%')
-		and (isnull(c.mobile, '') like '%' + @search_mobile + '%')
-		and (isnull(c.web_userid, '') like '%' + @search_web_userid + '%')
-	) x
-) y
-where _row between ((@i_page-1) * @i_perpage ) + 1 and (@i_page * @i_perpage)
-order by _row
-
-
-return 0
+RETURN 0;
 
 go
 
-	grant execute on sp_cor_administration_user_list to eqweb, eqai, COR_USER
+grant execute on sp_cor_administration_user_list to eqweb, eqai, COR_USER
 
 go

@@ -1,5 +1,4 @@
-﻿
-CREATE PROCEDURE [dbo].[sp_DocumentSign_Submit]
+﻿CREATE PROCEDURE [dbo].[sp_DocumentSign_Submit]
 	-- Add the parameters for the stored procedure here
 	@formId int,
 	@revisionId int,
@@ -15,7 +14,10 @@ AS
 	Type		: Stored Procedure 
 	Object Name	: [dbo].[sp_DocumentSign_Submit]
 	Description	: FormWCR Status update as Submitted
-
+	Updated By  :   Ebenezerraj S
+	Updated date:   11/04/2025
+	Rally ticket: US145973:Transition Systems to New SMTP Relay (relay.repsrv.com)
+	Change      :   The "From" email address has been updated from the Usecology domain to the Republic Services domain.
 
 	Description	: 
 				for updating the Form Status as Submitted after Sign & Submit, Send & Submit and Submit
@@ -84,7 +86,7 @@ BEGIN
 
 	declare @message_id int 
 	exec @message_id = sp_message_insert  @subject, 'Oops, something went wrong.  Please locate the form in Forms & Profile - Pending and resubmit.', '', @web_userid, 'COR', NULL, NULL, NULL
-	exec sp_messageAddress_insert @message_id, 'FROM', 'Cor@usecology.com', 'US Ecology Customer Service', NULL, NULL, NULL, NULL
+	exec sp_messageAddress_insert @message_id, 'FROM', 'cor@republicservices.com', 'Republic Services Customer Service', NULL, NULL, NULL, NULL
 	exec sp_messageAddress_insert @message_id, 'TO', @recipient, @full_name, NULL, NULL, NULL, NULL
 
 	declare @profile_id  int = (select profile_id from formwcr where form_id=@formId and revision_id=@revisionId)

@@ -1,4 +1,4 @@
-﻿CREATE PROCEDURE sp_batch_nonbulk 
+﻿CREATE OR ALTER PROCEDURE sp_batch_nonbulk 
 	@company_id		int
 ,	@profit_ctr_id	int
 ,	@location		varchar(15)
@@ -16,6 +16,7 @@ PB Object(s):	r_batch_nonbulk_sp
 				Moved to Plt_AI
 11/10/2017 MPM	Updated the bill unit for stock containers
 04/10/2024 Subhrajyoti Devops# 74737 - added container joining for bringing staging_row location
+02/18/2025 Kamendra Rally DE34898 - Fixed the join to pull the correct staging_row from Container table.
 				
 select * from receipt where receipt_id = 624659
 select * from receiptprice where receipt_id = 624659
@@ -28,139 +29,139 @@ sp_batch_nonbulk 42, 0, 'Inorganics', '201701', 1
 SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
 
 SELECT DISTINCT
-	ContainerDestination.receipt_id, 
-	ContainerDestination.line_id, 
-	ContainerDestination.container_id,
-	ContainerDestination.container_type,
-	ISNULL(Receipt.bill_unit_code, dbo.fn_receipt_bill_unit(Receipt.receipt_id, Receipt.line_id, Receipt.profit_ctr_id, Receipt.company_id)) AS bill_unit_code,
-	Receipt.receipt_date,   
-	ContainerDestination.treatment_id,
-	Receipt.receipt_status,
-	Treatment.treatment_desc,
-	Receipt.approval_code,
-	ISNULL(Generator.EPA_ID,'') AS EPA_ID,
-	ISNULL(Generator.generator_name,'') AS generator_name,
-	Receipt.manifest,
-	dbo.fn_container_receipt(ContainerDestination.receipt_id, ContainerDestination.line_id) AS Container,
-	Container.staging_row
-FROM Receipt
-JOIN Container (NOLOCK)  
-       ON Container.company_id = Receipt.company_id  
-       AND Container.profit_ctr_id = Receipt.profit_ctr_id  
-       AND Container.receipt_id = Receipt.receipt_id  
-       AND Container.line_id = Receipt.line_id  
-       AND Container.container_id is not null 
-JOIN ContainerDestination
-	ON ContainerDestination.receipt_id = Receipt.receipt_id
-	AND ContainerDestination.line_id = Receipt.line_id
-	AND ContainerDestination.profit_ctr_id = Receipt.profit_ctr_id
-	AND ContainerDestination.company_id = Receipt.company_id
-	AND ContainerDestination.location = @location
-	AND ContainerDestination.tracking_num = @tracking_num
-	AND ISNULL(ContainerDestination.cycle, 0) = @cycle
-	AND ContainerDestination.treatment_id IS NOT NULL
-	AND ContainerDestination.container_type = 'R'
-LEFT OUTER JOIN Treatment
-	ON Treatment.company_id = ContainerDestination.company_id
-	AND Treatment.profit_ctr_id = ContainerDestination.profit_ctr_id
-	AND Treatment.treatment_id = ContainerDestination.treatment_id
-LEFT OUTER JOIN Generator
-	ON Generator.generator_id = Receipt.generator_id
-WHERE Receipt.profit_ctr_id = @profit_ctr_id
-	AND Receipt.company_id = @company_id
-	AND Receipt.trans_type = 'D'
-	AND Receipt.trans_mode = 'I'
-	AND Receipt.fingerpr_status = 'A'
-	AND Receipt.bulk_flag = 'F'
+	cd.receipt_id, 
+	cd.line_id, 
+	cd.container_id,
+	cd.container_type,
+	ISNULL(r.bill_unit_code, dbo.fn_receipt_bill_unit(r.receipt_id, r.line_id, r.profit_ctr_id, r.company_id)) AS bill_unit_code,
+	r.receipt_date,   
+	cd.treatment_id,
+	r.receipt_status,
+	t.treatment_desc,
+	r.approval_code,
+	ISNULL(g.EPA_ID,'') AS EPA_ID,
+	ISNULL(g.generator_name,'') AS generator_name,
+	r.manifest,
+	dbo.fn_container_receipt(cd.receipt_id, cd.line_id) AS Container,
+	c.staging_row
+FROM Receipt r
+JOIN Container c (NOLOCK)  
+       ON c.company_id = r.company_id  
+       AND c.profit_ctr_id = r.profit_ctr_id  
+       AND c.receipt_id = r.receipt_id  
+       AND c.line_id = r.line_id  
+       AND c.container_id is not null
+JOIN ContainerDestination cd
+	ON cd.receipt_id = r.receipt_id
+	AND cd.line_id = r.line_id
+	AND cd.profit_ctr_id = r.profit_ctr_id
+	AND cd.company_id = r.company_id
+	AND cd.location = @location
+	AND cd.tracking_num = @tracking_num
+	AND ISNULL(cd.cycle, 0) = @cycle
+	AND cd.treatment_id IS NOT NULL
+	AND cd.container_type = 'R'
+	AND cd.container_id = c.container_id
+LEFT OUTER JOIN Treatment t
+	ON t.company_id = cd.company_id
+	AND t.profit_ctr_id = cd.profit_ctr_id
+	AND t.treatment_id = cd.treatment_id
+LEFT OUTER JOIN Generator g
+	ON g.generator_id = r.generator_id
+WHERE r.profit_ctr_id = @profit_ctr_id
+	AND r.company_id = @company_id
+	AND r.trans_type = 'D'
+	AND r.trans_mode = 'I'
+	AND r.fingerpr_status = 'A'
+	AND r.bulk_flag = 'F'
 
 UNION ALL
 
 SELECT 
-	ContainerDestination.receipt_id, 
-	ContainerDestination.line_id, 
-	ContainerDestination.container_id,
-	ContainerDestination.container_type,
-	Receipt.bill_unit_code,
-	Receipt.receipt_date,   
-	Receipt.treatment_id,
-	Receipt.receipt_status,
-	Treatment.treatment_desc,
-	Receipt.approval_code,
-	ISNULL(Generator.EPA_ID,'') AS EPA_ID,
-	ISNULL(Generator.generator_name,'') AS generator_name,
-	Receipt.manifest,
-	dbo.fn_container_receipt(ContainerDestination.receipt_id, ContainerDestination.line_id) AS Container ,
-	Container.staging_row
-FROM Receipt
-JOIN Container (NOLOCK)  
-       ON Container.company_id = Receipt.company_id  
-       AND Container.profit_ctr_id = Receipt.profit_ctr_id  
-       AND Container.receipt_id = Receipt.receipt_id  
-       AND Container.line_id = Receipt.line_id  
-       AND Container.container_id is not null 
-JOIN ContainerDestination
-	ON ContainerDestination.receipt_id = Receipt.receipt_id
-	AND ContainerDestination.line_id = Receipt.line_id
-	AND ContainerDestination.profit_ctr_id = Receipt.profit_ctr_id
-	AND ContainerDestination.company_id = Receipt.company_id
-	AND ContainerDestination.location = @location
-	AND ContainerDestination.tracking_num = @tracking_num
-	AND ISNULL(ContainerDestination.cycle, 0) = @cycle
-	AND ContainerDestination.treatment_id IS NULL
-	AND ContainerDestination.container_type = 'R'
-LEFT OUTER JOIN Treatment
-	ON Treatment.company_id = Receipt.company_id
-	AND Treatment.profit_ctr_id = Receipt.profit_ctr_id
-	AND Treatment.treatment_id = Receipt.treatment_id
-LEFT OUTER JOIN Generator
-	ON Generator.generator_id = Receipt.generator_id
-WHERE Receipt.profit_ctr_id = @profit_ctr_id
-	AND Receipt.company_id = @company_id
-	AND Receipt.trans_type = 'D'
-	AND Receipt.trans_mode = 'I'
-	AND Receipt.fingerpr_status = 'A'
-	AND Receipt.bulk_flag = 'F'	
+	cd.receipt_id, 
+	cd.line_id, 
+	cd.container_id,
+	cd.container_type,
+	r.bill_unit_code,
+	r.receipt_date,   
+	r.treatment_id,
+	r.receipt_status,
+	t.treatment_desc,
+	r.approval_code,
+	ISNULL(g.EPA_ID,'') AS EPA_ID,
+	ISNULL(g.generator_name,'') AS generator_name,
+	r.manifest,
+	dbo.fn_container_receipt(cd.receipt_id, cd.line_id) AS Container ,
+	c.staging_row
+FROM Receipt r
+JOIN Container c (NOLOCK)  
+       ON c.company_id = r.company_id  
+       AND c.profit_ctr_id = r.profit_ctr_id  
+       AND c.receipt_id = r.receipt_id  
+       AND c.line_id = r.line_id  
+       AND c.container_id is not null 
+JOIN ContainerDestination cd
+	ON cd.receipt_id = r.receipt_id
+	AND cd.line_id = r.line_id
+	AND cd.profit_ctr_id = r.profit_ctr_id
+	AND cd.company_id = r.company_id
+	AND cd.location = @location
+	AND cd.tracking_num = @tracking_num
+	AND ISNULL(cd.cycle, 0) = @cycle
+	AND cd.treatment_id IS NULL
+	AND cd.container_type = 'R'
+	AND cd.container_id = c.container_id
+LEFT OUTER JOIN Treatment t
+	ON t.company_id = r.company_id
+	AND t.profit_ctr_id = r.profit_ctr_id
+	AND t.treatment_id = r.treatment_id
+LEFT OUTER JOIN Generator g
+	ON g.generator_id = r.generator_id
+WHERE r.profit_ctr_id = @profit_ctr_id
+	AND r.company_id = @company_id
+	AND r.trans_type = 'D'
+	AND r.trans_mode = 'I'
+	AND r.fingerpr_status = 'A'
+	AND r.bulk_flag = 'F'
 
 UNION ALL
 
-SELECT ContainerDestination.receipt_id, 
-	ContainerDestination.line_id, 
-	ContainerDestination.container_id,
-	ContainerDestination.container_type,
+SELECT cd.receipt_id, 
+	cd.line_id, 
+	cd.container_id,
+	cd.container_type,
 --	'DM55' AS bill_unit_code,
-	CASE Container.container_size WHEN NULL THEN 'DM55' WHEN '' THEN 'DM55' ELSE Container.container_size END as bill_unit_code,
-	ContainerDestination.date_added,   
-	ContainerDestination.treatment_id,
-	ContainerDestination.status,
-	Treatment.treatment_desc,
+	CASE c.container_size WHEN NULL THEN 'DM55' WHEN '' THEN 'DM55' ELSE c.container_size END as bill_unit_code,
+	cd.date_added,   
+	cd.treatment_id,
+	cd.status,
+	t.treatment_desc,
 	'' AS approval_code,
 	'' AS EPA_ID,
 	'' AS generator_name,
 	'' AS manifest,
-	dbo.fn_container_stock(ContainerDestination.line_id, ContainerDestination.company_id, ContainerDestination.profit_ctr_id),
-	Container.staging_row
-FROM ContainerDestination
-JOIN Container
-	ON Container.profit_ctr_id = ContainerDestination.profit_ctr_id
-	AND Container.company_id = ContainerDestination.company_id
-	AND Container.receipt_id = ContainerDestination.receipt_id
-	AND Container.container_type = ContainerDestination.container_type
-	AND Container.line_id = ContainerDestination.line_id
-LEFT OUTER JOIN Treatment
-	ON Treatment.treatment_id = ContainerDestination.treatment_id
-	AND Treatment.profit_ctr_id = ContainerDestination.profit_ctr_id
-	AND Treatment.company_id = ContainerDestination.company_id
-WHERE ContainerDestination.location = @location
-	AND ContainerDestination.tracking_num = @tracking_num
-	AND ContainerDestination.profit_ctr_id = @profit_ctr_id
-	AND ContainerDestination.company_id = @company_id
-	AND ISNULL(ContainerDestination.cycle, 0) = @cycle
-	AND ContainerDestination.container_type = 'S'
-
+	dbo.fn_container_stock(cd.line_id, cd.company_id, cd.profit_ctr_id),
+	c.staging_row
+FROM ContainerDestination cd
+JOIN Container c
+	ON c.profit_ctr_id = cd.profit_ctr_id
+	AND c.company_id = cd.company_id
+	AND c.receipt_id = cd.receipt_id
+	AND c.container_type = cd.container_type
+	AND c.line_id = cd.line_id
+	AND c.container_id = cd.container_id
+LEFT OUTER JOIN Treatment t
+	ON t.treatment_id = cd.treatment_id
+	AND t.profit_ctr_id = cd.profit_ctr_id
+	AND t.company_id = cd.company_id
+WHERE cd.location = @location
+	AND cd.tracking_num = @tracking_num
+	AND cd.profit_ctr_id = @profit_ctr_id
+	AND cd.company_id = @company_id
+	AND ISNULL(cd.cycle, 0) = @cycle
+	AND cd.container_type = 'S'
 
 GO
-
-
 
 GRANT EXECUTE
     ON [dbo].[sp_batch_nonbulk] TO [EQAI];

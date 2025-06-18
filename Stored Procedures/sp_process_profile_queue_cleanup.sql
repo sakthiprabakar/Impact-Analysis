@@ -9,7 +9,6 @@ GO
 
 SET NOCOUNT ON
 GO
-
 CREATE OR ALTER PROCEDURE [dbo].[sp_process_profile_queue_cleanup] (@debug INT = 0)
 AS
 /***************************************************************
@@ -19,7 +18,8 @@ This procedure automated cleanup of profile queues based on current status, trac
 
 -------------------------- History -----------------------------
 09/12/2024 - Dipankar - US120785 - Initial Version
-
+03/12/2025 - AM - RITM1327457 - Exclude records if import_source IN ('AESOPACT', 'AESOPID', 'AESOPNV', 'AESOPTX') 
+04/04/2025 - AM - CHG0079582 - Added import_source ISNULL to include only null's 
 EXEC dbo.sp_process_profile_queue_cleanup 0
 ****************************************************************/	
 
@@ -51,6 +51,7 @@ BEGIN
 								'Tech New', 'Tech Pending', 'Testing', 'Treat Study')
 		WHERE p.curr_status_code NOT IN ('A', 'C', 'R', 'V') -- 'P' - New/ Approved - Pending Pricess, H - Hold
 		AND p.ap_start_date < CAST(DATEADD(DAY, -90, GETDATE()) AS DATE)
+		AND import_source IS NULL -- (import_source NOT IN ('AESOPACT', 'AESOPID', 'AESOPNV', 'AESOPTX') 
 		AND p.profile_id > 0;
 
 		SET @count = @@ROWCOUNT

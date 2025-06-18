@@ -41,7 +41,7 @@ try:
     MODEL_ID = st.secrets.get("BEDROCK_MODEL_ID", "anthropic.claude-3-sonnet-20240229-v1:0")  # Default model
     
     # Get stored procedures source folder from secrets (optional, with fallback)
-    STORED_PROC_SRC_FOLDER = st.secrets.get("STORED_PROC_SRC_FOLDER", "stored_procedures_source")
+    STORED_PROC_SRC_FOLDER = st.secrets.get("STORED_PROC_SRC_FOLDER", "Stored Procedures")
     
 except KeyError as e:
     st.error(f"❌ Missing required secret: {e}")
@@ -54,7 +54,7 @@ except KeyError as e:
     # Optional secrets (will use defaults if not provided):
     AWS_REGION = "us-east-1"
     BEDROCK_MODEL_ID = "anthropic.claude-3-sonnet-20240229-v1:0"
-    STORED_PROC_SRC_FOLDER = "stored_procedures_source"
+    STORED_PROC_SRC_FOLDER = "Stored Procedures"
     """)
     st.stop() # Halt execution if config is missing
 

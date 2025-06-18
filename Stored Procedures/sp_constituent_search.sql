@@ -1,12 +1,12 @@
-﻿
-create proc sp_constituent_search (
+﻿CREATE OR ALTER PROCEDURE [dbo].[sp_constituent_search] (
 	@search_text	varchar(100) = ''
 ) AS
 /* **************************************************************************
 sp_constituent_search
 
 History:
-	8/21/2012 JPB  Created for use with EQOnline.com WCR
+08/21/2012 JPB  Created for use with EQOnline.com WCR
+05/29/2025 KS - Rally US116196 - Constituent - Integer data type preventing CAS # entry
 
 Sample:
 	sp_constituent_search
@@ -21,9 +21,9 @@ Sample:
 select const_id, 
 	const_alpha_desc
 	, case when cas_code is null then '' else 
-		substring(right('00000000' + convert(varchar(10), cas_code), 8), 1, 5) + '-'
-		+ substring(right('00000000' + convert(varchar(10), cas_code), 8), 6, 2) + '-'
-		+ substring(right('00000000' + convert(varchar(10), cas_code), 8), 8, 1)
+		substring(right('0000000000' + convert(varchar(20), cas_code), 10), 1, 7) + '-'
+		+ substring(right('0000000000' + convert(varchar(20), cas_code), 10), 8, 2) + '-'
+		+ substring(right('0000000000' + convert(varchar(20), cas_code), 10), 10, 1)
 	  end as cas_code
 	, ldr_id  
 from constituents 
@@ -31,11 +31,11 @@ where
 1 = CASE when @search_text = '' THEN 1 ELSE
 		CASE WHEN const_alpha_desc LIKE '%' + replace(@search_text, ' ', '%') + '%' THEN 1 ELSE
 			CASE WHEN cas_code is not null AND 
-					substring(right('00000000' + convert(varchar(10), cas_code), 8), 1, 5) + '-'
-					+ substring(right('00000000' + convert(varchar(10), cas_code), 8), 6, 2) + '-'
-					+ substring(right('00000000' + convert(varchar(10), cas_code), 8), 8, 1)
+					substring(right('0000000000' + convert(varchar(20), cas_code), 10), 1, 7) + '-'
+					+ substring(right('0000000000' + convert(varchar(20), cas_code), 10), 8, 2) + '-'
+					+ substring(right('0000000000' + convert(varchar(20), cas_code), 10), 10, 1)
 					LIKE '%' + replace(@search_text, ' ', '%') + '%' THEN 1 ELSE
-				CASE WHEN IsNumeric(@search_text) = 1 AND cas_code = convert(int, @search_text) THEN 1 ELSE
+				CASE WHEN IsNumeric(@search_text) = 1 AND cas_code = convert(bigint, @search_text) THEN 1 ELSE
 					CASE WHEN IsNumeric(@search_text) = 1 AND ldr_id = convert(int, @search_text) THEN 1 ELSE
 					0
 					END
@@ -45,21 +45,16 @@ where
 	END
 and ldr_id is not null
 order by const_alpha_desc 
-
-
 GO
+
 GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_constituent_search] TO [EQWEB]
-    AS [dbo];
+    ON OBJECT::[dbo].[sp_constituent_search] TO [EQWEB];
 GO
+
 GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_constituent_search] TO [COR_USER]
-    AS [dbo];
-
-
-
+    ON OBJECT::[dbo].[sp_constituent_search] TO [COR_USER];
 GO
-GRANT EXECUTE
-    ON OBJECT::[dbo].[sp_constituent_search] TO [EQAI]
-    AS [dbo];
 
+GRANT EXECUTE
+    ON OBJECT::[dbo].[sp_constituent_search] TO [EQAI];
+GO

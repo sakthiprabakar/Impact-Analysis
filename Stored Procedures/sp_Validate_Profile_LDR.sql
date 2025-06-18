@@ -15,20 +15,18 @@ AS
 
 /* ******************************************************************
 
-	Updated By		: Prabhu
-	Updated On		: 4th Oct 2021
-	Type			: Stored Procedure
-	Object Name		: [sp_Validate_Profile_LDR]
+	 Updated By			: Divya Bharathi R  
+	 Updated On			: 25th Feb 2025  
+	 Type				: Stored Procedure  
+	 Object Name		: [sp_Validate_Profile_LDR]  
+	 Last Change		: Removed the validation for exceeds_LDR
+	 Reference Ticket	: DE37954: UAT Bug: Express Renewal > Express Renewal Window is Not Retrieving Valid Candidates for Renewal
+	 Purpose			: Procedure to validate LDR Supplement form required fields and Update the Status of section
 
-
-	Procedure to validate LDR Supplement form required fields and Update the Status of section
-
-inputs 
+Inputs:  
 	
 	@profile_id
 	@web_userid
-
-
 
 Samples:
  EXEC [sp_Validate_Profile_LDR] @profile_id,@web_userid
@@ -75,8 +73,8 @@ BEGIN
 
 		IF(EXISTS(SELECT * FROM #tempProfile WHERE  ISNULL(constituents_requiring_treatment_flag,'')='T'))
 		BEGIN
-			IF(NOT EXISTS(SELECT * FROM ProfileConstituent WHERE exceeds_LDR='T' AND requiring_treatment_flag='T' and profile_id=@profile_id)) 
-			--AND Specifier='LDR-WO'
+			IF(NOT EXISTS(SELECT * FROM ProfileConstituent WHERE requiring_treatment_flag='T' and profile_id=@profile_id)) 
+			--AND Specifier='LDR-WO' AND exceeds_LDR='T'
 			BEGIN
 				SET @ProfileStatusFlag = 'P'
 			END

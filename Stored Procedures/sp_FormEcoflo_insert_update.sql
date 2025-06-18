@@ -1,14 +1,8 @@
-﻿USE [PLT_AI]
-GO
-/***********************************************************************************************/
-DROP PROCEDURE IF EXISTS [sp_FormEcoflo_insert_update]
-GO
-CREATE PROCEDURE [dbo].[sp_FormEcoflo_insert_update] 
-	   @Data XML,
-	   @form_id int,
-	   @revision_id int,
-	   @web_userid varchar(100)
-
+﻿ALTER PROCEDURE dbo.sp_FormEcoflo_insert_update 
+	  @Data XML
+	, @form_id INTEGER
+	, @revision_id INTEGER
+	, @web_userid VARCHAR(100)
 AS
 /*********************************************************************************** 
     Updated By    : Nallaperumal C
@@ -19,9 +13,7 @@ AS
 	Updated By   : Ranjini C
     Updated On   : 08-AUGUST-2024
     Ticket       : 93217
-	Updated By   : Sathiyamoorthi M
-    Updated On   : 31-Jan-2025
-    Ticket       : DE37742
+	--Updated by Blair Christensen for Titan 05/21/2025
     Decription   : This procedure is used to assign web_userid to created_by and modified_by columns.                                                     
     Execution Statement    	
 	EXEC  [dbo].[sp_FormEcoflo_insert_update]  @Data, @form_id, @revision_id 
@@ -54,112 +46,97 @@ AS
 --    </FuelsBlending>',
 --@form_id int=461587,
 --@revision_id int=1
-	BEGIN
-		DECLARE @newForm_id INT 
-   		DECLARE @newrev_id INT  = 1
-		IF(NOT EXISTS(SELECT form_id FROM FormEcoflo WHERE wcr_id = @form_id and wcr_rev_id =  @revision_id))			
-			BEGIN				
-				EXEC @newForm_id = sp_sequence_next 'form.form_id'
-				  INSERT INTO FormEcoflo(
-					form_id,
-					revision_id,
-					wcr_id,
-					wcr_rev_id,
-					viscosity_value,
-					total_solids_low,
-					total_solids_high,
-					total_solids_description,
-					fluorine_low,
-					fluorine_high,
-					chlorine_low,
-					chlorine_high,
-					bromine_low,
-					bromine_high,
-					iodine_low,
-					iodine_high,
-					created_by,
-					modified_by,
-					date_created,
-					date_modified,
-					total_solids_flag,
-					organic_halogens_flag,
-					fluorine_low_flag,
-					fluorine_high_flag,
-					chlorine_low_flag,
-					chlorine_high_flag,
-					bromine_low_flag,
-					bromine_high_flag,
-					iodine_low_flag,
-					iodine_high_flag)
-					SELECT 
-						form_id=@newForm_id,
-						revision_id=@newrev_id,
-						wcr_id = @form_id,
-						wcr_rev_id = @revision_id,
-						viscosity_value = p.v.value('viscosity_value[1]','int'),
-						total_solids_low = p.v.value('total_solids_low[1]','varchar(5)'),
-						total_solids_high = p.v.value('total_solids_high[1]','varchar(5)'),
-						total_solids_description = p.v.value('total_solids_description[1]','varchar(100)'),
-						fluorine_low = p.v.value('fluorine_low[1]','decimal(38,20)'),
-						fluorine_high = p.v.value('fluorine_high[1]','decimal(38,20)'),
-						chlorine_low = p.v.value('chlorine_low[1]','decimal(38,20)'),
-						chlorine_high = p.v.value('chlorine_high[1]','decimal(38,20)'),
-						bromine_low = p.v.value('bromine_low[1]','decimal(38,20)'),
-						bromine_high = p.v.value('bromine_high[1]','decimal(38,20)'),
-						iodine_low = p.v.value('iodine_low[1]','decimal(38,20)'),
-						iodine_high = p.v.value('iodine_high[1]','decimal(38,20)'),
-						created_by = @web_userid,
-						modified_by = @web_userid,
-						date_created = GETDATE(),
-						date_modified = GETDATE(),
-						total_solids_flag = p.v.value('total_solids_flag[1]','char(1)'),
-						organic_halogens_flag = p.v.value('organic_halogens_flag[1]','char(1)'),
-						fluorine_low_flag = p.v.value('fluorine_low_flag[1]','char(1)'),
-						fluorine_high_flag = p.v.value('fluorine_high_flag[1]','char(1)'),
-						chlorine_low_flag = p.v.value('chlorine_low_flag[1]','char(1)'),
-						chlorine_high_flag = p.v.value('chlorine_high_flag[1]','char(1)'),
-						bromine_low_flag = p.v.value('bromine_low_flag[1]','char(1)'),
-						bromine_high_flag = p.v.value('bromine_high_flag[1]','char(1)'),
-						iodine_low_flag = p.v.value('iodine_low_flag[1]','char(1)'),
-						iodine_high_flag = p.v.value('iodine_high_flag[1]','char(1)')
-				   FROM
-				       @Data.nodes('FuelsBlending')p(v)				  
-			END
-		ELSE
-			BEGIN
-				UPDATE FormEcoflo
-				SET
-					viscosity_value = p.v.value('viscosity_value[1]','int'),
-					total_solids_low = p.v.value('total_solids_low[1]','varchar(5)'),
-					total_solids_high = p.v.value('total_solids_high[1]','varchar(5)'),
-					total_solids_description = p.v.value('total_solids_description[1]','varchar(100)'),
-					fluorine_low = p.v.value('fluorine_low[1]','decimal(38,20)'),
-					fluorine_high = p.v.value('fluorine_high[1]','decimal(38,20)'),
-					chlorine_low = p.v.value('chlorine_low[1]','decimal(38,20)'),
-					chlorine_high = p.v.value('chlorine_high[1]','decimal(38,20)'),
-					bromine_low = p.v.value('bromine_low[1]','decimal(38,20)'),
-					bromine_high = p.v.value('bromine_high[1]','decimal(38,20)'),
-					iodine_low = p.v.value('iodine_low[1]','decimal(38,20)'),
-					iodine_high = p.v.value('iodine_high[1]','decimal(38,20)'),
-					created_by = @web_userid,
-					modified_by = @web_userid,
-					--date_created = GETDATE(),
-					date_modified = GETDATE(),
-					total_solids_flag = p.v.value('total_solids_flag[1]','char(1)'),
-					organic_halogens_flag = p.v.value('organic_halogens_flag[1]','char(1)'),
-					fluorine_low_flag = p.v.value('fluorine_low_flag[1]','char(1)'),
-					fluorine_high_flag = p.v.value('fluorine_high_flag[1]','char(1)'),
-					chlorine_low_flag = p.v.value('chlorine_low_flag[1]','char(1)'),
-					chlorine_high_flag = p.v.value('chlorine_high_flag[1]','char(1)'),
-					bromine_low_flag = p.v.value('bromine_low_flag[1]','char(1)'),
-					bromine_high_flag = p.v.value('bromine_high_flag[1]','char(1)'),
-					iodine_low_flag = p.v.value('iodine_low_flag[1]','char(1)'),
-					iodine_high_flag = p.v.value('iodine_high_flag[1]','char(1)')
-				FROM
-					@Data.nodes('FuelsBlending')p(v) WHERE  wcr_id= @form_id and wcr_rev_id =  @revision_id
-			END
-	END	
-	GO
-	GRANT EXEC ON [dbo].[sp_FormEcoflo_insert_update] TO COR_USER;
-	GO	
-/******************************************************************************************************************************/
+BEGIN
+	DECLARE @newForm_id INTEGER 
+		  , @newrev_id INTEGER = 1
+		  , @FormWCR_uid INTEGER;
+
+	IF NOT EXISTS (SELECT 1 FROM dbo.FormEcoflo WHERE wcr_id = @form_id and wcr_rev_id =  @revision_id)			
+		BEGIN				
+			EXEC @newForm_id = sp_sequence_next 'form.form_id';
+
+			IF EXISTS (SELECT 1 FROM dbo.FormWCR WHERE form_id = @form_id AND revision_id = @revision_id)
+				BEGIN
+					SELECT @FormWCR_uid = formWCR_uid
+					  FROM dbo.FormWCR
+					 WHERE form_id = @form_id
+					   AND revision_id = @revision_id;
+				END
+			ELSE
+				BEGIN
+					SET @FormWCR_uid = NULL;
+				END
+
+			INSERT INTO dbo.FormEcoflo (form_id, revision_id, formWCR_uid
+				 , wcr_id, wcr_rev_id
+				 , viscosity_value
+				 , total_solids_low, total_solids_high, total_solids_description
+				 , fluorine_low, fluorine_high, chlorine_low, chlorine_high
+				 , bromine_low, bromine_high, iodine_low, iodine_high
+				 , created_by, modified_by, date_created, date_modified
+				 , total_solids_flag, organic_halogens_flag, fluorine_low_flag, fluorine_high_flag
+				 , chlorine_low_flag, chlorine_high_flag, bromine_low_flag, bromine_high_flag
+				 , iodine_low_flag, iodine_high_flag
+				 )
+			SELECT @newForm_id as form_id, @newrev_id as revision_id, @FormWCR_uid as formWCR_uid
+				 , @form_id as wcr_id, @revision_id as wcr_rev_id
+				 , p.v.value('viscosity_value[1]', 'INTEGER') as viscosity_value
+				 , p.v.value('total_solids_low[1]', 'VARCHAR(5)') as total_solids_low
+				 , p.v.value('total_solids_high[1]', 'VARCHAR(5)') as total_solids_high
+				 , p.v.value('total_solids_description[1]', 'VARCHAR(100)') as total_solids_description
+				 , p.v.value('fluorine_low[1]', 'DECIMAL(38,20)') as fluorine_low
+				 , p.v.value('fluorine_high[1]', 'DECIMAL(38,20)') as fluorine_high
+				 , p.v.value('chlorine_low[1]', 'DECIMAL(38,20)') as chlorine_low
+				 , p.v.value('chlorine_high[1]', 'DECIMAL(38,20)') as chlorine_high
+				 , p.v.value('bromine_low[1]', 'DECIMAL(38,20)') as bromine_low
+				 , p.v.value('bromine_high[1]', 'DECIMAL(38,20)') as bromine_high
+				 , p.v.value('iodine_low[1]', 'DECIMAL(38,20)') as iodine_low
+				 , p.v.value('iodine_high[1]', 'DECIMAL(38,20)') as iodine_high
+				 , @web_userid as created_by, @web_userid as modified_by, GETDATE() as date_created, GETDATE() as date_modified
+				 , p.v.value('total_solids_flag[1]', 'CHAR(1)') as total_solids_flag
+				 , p.v.value('organic_halogens_flag[1]', 'CHAR(1)') as organic_halogens_flag
+				 , p.v.value('fluorine_low_flag[1]', 'CHAR(1)') as fluorine_low_flag
+				 , p.v.value('fluorine_high_flag[1]', 'CHAR(1)') as fluorine_high_flag
+				 , p.v.value('chlorine_low_flag[1]', 'CHAR(1)') as chlorine_low_flag
+				 , p.v.value('chlorine_high_flag[1]', 'CHAR(1)') as chlorine_high_flag
+				 , p.v.value('bromine_low_flag[1]', 'CHAR(1)') as bromine_low_flag
+				 , p.v.value('bromine_high_flag[1]', 'CHAR(1)') as bromine_high_flag
+				 , p.v.value('iodine_low_flag[1]', 'CHAR(1)') as iodine_low_flag
+				 , p.v.value('iodine_high_flag[1]', 'CHAR(1)') as iodine_high_flag
+			  FROM @Data.nodes('FuelsBlending')p(v);
+		END
+	ELSE
+		BEGIN
+			UPDATE dbo.FormEcoflo
+			   SET viscosity_value = p.v.value('viscosity_value[1]', 'INTEGER')
+			     , total_solids_low = p.v.value('total_solids_low[1]', 'VARCHAR(5)')
+				 , total_solids_high = p.v.value('total_solids_high[1]', 'VARCHAR(5)')
+				 , total_solids_description = p.v.value('total_solids_description[1]', 'VARCHAR(100)')
+				 , fluorine_low = p.v.value('fluorine_low[1]', 'DECIMAL(38,20)')
+				 , fluorine_high = p.v.value('fluorine_high[1]', 'DECIMAL(38,20)')
+				 , chlorine_low = p.v.value('chlorine_low[1]', 'DECIMAL(38,20)')
+				 , chlorine_high = p.v.value('chlorine_high[1]', 'DECIMAL(38,20)')
+				 , bromine_low = p.v.value('bromine_low[1]', 'DECIMAL(38,20)')
+				 , bromine_high = p.v.value('bromine_high[1]', 'DECIMAL(38,20)')
+				 , iodine_low = p.v.value('iodine_low[1]', 'DECIMAL(38,20)')
+				 , iodine_high = p.v.value('iodine_high[1]', 'DECIMAL(38,20)')
+				 , created_by = @web_userid, modified_by = @web_userid, date_modified = GETDATE()
+				 , total_solids_flag = p.v.value('total_solids_flag[1]', 'CHAR(1)')
+				 , organic_halogens_flag = p.v.value('organic_halogens_flag[1]', 'CHAR(1)')
+				 , fluorine_low_flag = p.v.value('fluorine_low_flag[1]', 'CHAR(1)')
+				 , fluorine_high_flag = p.v.value('fluorine_high_flag[1]', 'CHAR(1)')
+				 , chlorine_low_flag = p.v.value('chlorine_low_flag[1]', 'CHAR(1)')
+				 , chlorine_high_flag = p.v.value('chlorine_high_flag[1]', 'CHAR(1)')
+				 , bromine_low_flag = p.v.value('bromine_low_flag[1]', 'CHAR(1)')
+				 , bromine_high_flag = p.v.value('bromine_high_flag[1]', 'CHAR(1)')
+				 , iodine_low_flag = p.v.value('iodine_low_flag[1]', 'CHAR(1)')
+				 , iodine_high_flag = p.v.value('iodine_high_flag[1]', 'CHAR(1)')
+			  FROM @Data.nodes('FuelsBlending')p(v)
+			 WHERE wcr_id = @form_id
+			   AND wcr_rev_id =  @revision_id;
+		END
+END	
+GO
+
+GRANT EXEC ON [dbo].[sp_FormEcoflo_insert_update] TO COR_USER;
+GO
